@@ -1,0 +1,15 @@
+# Cargo.toml
+[package]
+name = "my_app"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+libadwaita = "0.5"
+gtk = { version = "0.7", package = "gtk4" }
+directories = "5.0"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.8" # Or the latest version
+dirs = "5.0" # Or the latest version
+
+
