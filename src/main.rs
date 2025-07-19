@@ -24,6 +24,7 @@ pub struct Config {
 pub struct GameProfile {
     pub exe: String,
     pub multiplier: u32,
+    #[serde(serialize_with = "serialize_flow_scale", deserialize_with = "deserialize_flow_scale")]
     pub flow_scale: f32,
     pub performance_mode: bool,
     pub hdr_mode: bool,
@@ -36,7 +37,7 @@ impl Default for GameProfile {
         GameProfile {
             exe: String::new(),
             multiplier: 1, // Default to "off" (1)
-            flow_scale: 0.7,
+            flow_scale: round_to_2_decimals(0.7),
             performance_mode: true,
             hdr_mode: false,
             experimental_present_mode: "vsync".to_string(),
@@ -102,8 +103,9 @@ impl AppState {
                     self.multiplier_dropdown.set_selected(pos);
                 }
 
-                // Update Flow Scale Entry
-                self.flow_scale_entry.set_text(&profile.flow_scale.to_string());
+                // Update Flow Scale Entry (round to avoid floating point display issues)
+                let rounded_flow_scale = round_to_2_decimals(profile.flow_scale);
+                self.flow_scale_entry.set_text(&format!("{:.2}", rounded_flow_scale));
 
                 // Update Performance Mode Switch
                 self.performance_mode_switch.set_active(profile.performance_mode);
@@ -133,13 +135,15 @@ impl AppState {
             self.hdr_mode_switch.set_active(false);
             self.experimental_present_mode_dropdown.set_selected(0); // Default to first item
 
-            // Switch to the welcome page
-            self.main_stack.set_visible_child_name("welcome_page");
+            // Switch to the about page
+            self.main_stack.set_visible_child_name("about_page");
         }
     }
 
-    // Populates and updates the sidebar with game profiles
-    fn populate_sidebar(&self) {
+
+
+    // Populates sidebar with optional app_state for button handlers
+    fn populate_sidebar_with_handlers(&self, app_state: Option<Rc<RefCell<AppState>>>) {
         // Clear existing rows
         while let Some(child) = self.sidebar_list_box.first_child() {
             self.sidebar_list_box.remove(&child);
@@ -147,13 +151,164 @@ impl AppState {
 
         for (i, profile) in self.config.game.iter().enumerate() {
             let row = gtk::ListBoxRow::new();
-            let button = gtk::Button::builder()
-                .label(&profile.exe)
-                .halign(gtk::Align::Start)
-                .css_classes(["flat"])
+            
+            // Create a horizontal box to hold the profile name and buttons
+            let row_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(8)
+                .margin_start(12)
+                .margin_end(12)
+                .margin_top(8)
+                .margin_bottom(8)
                 .build();
 
-            row.set_child(Some(&button));
+            // Profile name label
+            let label = gtk::Label::builder()
+                .label(&profile.exe)
+                .halign(gtk::Align::Start)
+                .hexpand(true)
+                .build();
+
+            // Edit button
+            let edit_button = gtk::Button::builder()
+                .label("🖊")
+                .css_classes(["flat", "circular"])
+                .tooltip_text("Edit profile name")
+                .build();
+
+            // Remove button
+            let remove_button = gtk::Button::builder()
+                .label("✕")
+                .css_classes(["flat", "circular", "destructive-action"])
+                .tooltip_text("Remove profile")
+                .build();
+
+            // Add all elements to the row box
+            row_box.append(&label);
+            row_box.append(&edit_button);
+            row_box.append(&remove_button);
+
+            // Connect button handlers if app_state is available
+            if let Some(app_state_ref) = &app_state {
+                // Edit button handler
+                let app_state_clone = app_state_ref.clone();
+                let profile_index = i;
+                edit_button.connect_clicked(move |_| {
+                    let state = app_state_clone.borrow();
+                    let main_window = &state.main_window;
+                    
+                    // Create edit dialog
+                    let dialog = MessageDialog::new(
+                        Some(main_window),
+                        gtk::DialogFlags::MODAL,
+                        gtk::MessageType::Question,
+                        gtk::ButtonsType::None,
+                        "Edit profile name:",
+                    );
+                    dialog.set_title(Some("Edit Profile"));
+
+                    let entry = gtk::Entry::builder()
+                        .placeholder_text("Profile Name")
+                        .text(&state.config.game[profile_index].exe)
+                        .margin_top(12)
+                        .margin_bottom(12)
+                        .margin_start(12)
+                        .margin_end(12)
+                        .build();
+                    
+                    dialog.content_area().append(&entry);
+                    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+                    dialog.add_button("Save", gtk::ResponseType::Other(1));
+                    dialog.set_default_response(gtk::ResponseType::Other(1));
+
+                    let app_state_clone_dialog = app_state_clone.clone();
+                    let entry_clone = entry.clone();
+                    dialog.connect_response(move |d, response| {
+                        if response == gtk::ResponseType::Other(1) {
+                            let new_name = entry_clone.text().to_string();
+                            if !new_name.is_empty() {
+                                let mut state = app_state_clone_dialog.borrow_mut();
+                                
+                                // Check if profile with this name already exists (excluding current)
+                                if state.config.game.iter().enumerate().any(|(idx, p)| idx != profile_index && p.exe == new_name) {
+                                    let error_dialog = MessageDialog::new(
+                                        Some(d),
+                                        gtk::DialogFlags::MODAL,
+                                        gtk::MessageType::Error,
+                                        gtk::ButtonsType::Ok,
+                                        "A profile with this name already exists",
+                                    );
+                                    error_dialog.set_title(Some("Error"));
+                                    error_dialog.connect_response(move |d, _| { d.close(); });
+                                    error_dialog.present();
+                                    return;
+                                }
+
+                                // Update profile name
+                                state.config.game[profile_index].exe = new_name;
+                                state.save_current_config();
+                                state.populate_sidebar_with_handlers(Some(app_state_clone_dialog.clone()));
+                            }
+                        }
+                        d.close();
+                    });
+                    dialog.present();
+                });
+
+                // Remove button handler
+                let app_state_clone = app_state_ref.clone();
+                let profile_index = i;
+                remove_button.connect_clicked(move |_| {
+                    let state = app_state_clone.borrow();
+                    let main_window = &state.main_window;
+                    let profile_name = &state.config.game[profile_index].exe;
+                    
+                    // Create confirmation dialog
+                    let dialog = MessageDialog::new(
+                        Some(main_window),
+                        gtk::DialogFlags::MODAL,
+                        gtk::MessageType::Warning,
+                        gtk::ButtonsType::None,
+                        &format!("Are you sure you want to remove the profile '{}'?", profile_name),
+                    );
+                    dialog.set_title(Some("Remove Profile"));
+                    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
+                    dialog.add_button("Remove", gtk::ResponseType::Other(1));
+                    dialog.set_default_response(gtk::ResponseType::Cancel);
+
+                    let app_state_clone_dialog = app_state_clone.clone();
+                    dialog.connect_response(move |d, response| {
+                        if response == gtk::ResponseType::Other(1) {
+                            let mut state = app_state_clone_dialog.borrow_mut();
+                            
+                            // Remove the profile
+                            state.config.game.remove(profile_index);
+                            
+                            // Update selected index if needed
+                            if let Some(selected) = state.selected_profile_index {
+                                if selected == profile_index {
+                                    // If we removed the selected profile, select the first available or none
+                                    state.selected_profile_index = if state.config.game.is_empty() { None } else { Some(0) };
+                                } else if selected > profile_index {
+                                    // Adjust index if we removed a profile before the selected one
+                                    state.selected_profile_index = Some(selected - 1);
+                                }
+                            }
+                            
+                            state.save_current_config();
+                            state.populate_sidebar_with_handlers(Some(app_state_clone_dialog.clone()));
+                            drop(state);
+                            
+                            // Update main window
+                            app_state_clone_dialog.borrow().update_main_window_from_profile();
+                        }
+                        d.close();
+                    });
+                    dialog.present();
+                });
+            }
+
+            row.set_child(Some(&row_box));
             self.sidebar_list_box.append(&row);
 
             // Set the selected state
@@ -162,6 +317,35 @@ impl AppState {
             }
         }
     }
+}
+
+// --- Utility Functions ---
+
+fn round_to_2_decimals(value: f32) -> f32 {
+    // Use string formatting to get exactly 2 decimal places and then parse back
+    // This avoids floating point precision issues
+    format!("{:.2}", value).parse().unwrap_or(value)
+}
+
+// Custom serde functions to ensure flow_scale is always rounded
+fn serialize_flow_scale<S>(value: &f32, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    // Force to 2 decimal places and serialize as a precise decimal
+    let rounded = round_to_2_decimals(*value);
+    let formatted = format!("{:.2}", rounded);
+    let precise_value: f64 = formatted.parse().unwrap_or(*value as f64);
+    serializer.serialize_f64(precise_value)
+}
+
+fn deserialize_flow_scale<'de, D>(deserializer: D) -> Result<f32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let value = f64::deserialize(deserializer)?;
+    Ok(round_to_2_decimals(value as f32))
 }
 
 // --- Configuration File Handling Functions ---
@@ -183,8 +367,25 @@ fn load_config() -> Result<Config, io::Error> {
     if config_path.exists() {
         let contents = fs::read_to_string(&config_path)?;
         println!("Successfully read config contents ({} bytes).", contents.len());
-        toml::from_str(&contents)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse TOML: {}", e)))
+        let mut config: Config = toml::from_str(&contents)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse TOML: {}", e)))?;
+        
+        // Clean up any floating point precision issues in existing configs
+        let mut needs_save = false;
+        for profile in &mut config.game {
+            let original = profile.flow_scale;
+            profile.flow_scale = round_to_2_decimals(profile.flow_scale);
+            if (original - profile.flow_scale).abs() > f32::EPSILON {
+                needs_save = true;
+            }
+        }
+        
+        // Save the cleaned config if we made changes
+        if needs_save {
+            let _ = save_config(&config);
+        }
+        
+        Ok(config)
     } else {
         println!("Config file not found at {:?}, creating default.", config_path);
         Ok(Config { version: 1, game: Vec::new() })
@@ -205,8 +406,12 @@ fn save_config(config: &Config) -> Result<(), io::Error> {
 
 fn main() -> glib::ExitCode {
     let application = libadwaita::Application::builder()
-        .application_id("com.example.MyApp")
+        .application_id("com.cali666.lsfg-vk-ui")
         .build();
+    
+    // Set the desktop file name for proper GNOME integration
+    glib::set_application_name("LSFG-VK UI");
+    glib::set_prgname(Some("lsfg-vk-ui"));
 
     application.connect_startup(move |_app| { // Renamed app to _app
         // Load CSS for sidebar background
@@ -221,6 +426,12 @@ fn main() -> glib::ExitCode {
             &provider,
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
+
+        // Set up icon theme for the application icon
+        if let Some(display) = gtk::gdk::Display::default() {
+            let icon_theme = gtk::IconTheme::for_display(&display);
+            icon_theme.add_resource_path("/com/cali666/lsfg-vk-ui/icons");
+        }
     });
 
     application.connect_activate(move |app| {
@@ -239,6 +450,9 @@ fn main() -> glib::ExitCode {
             .object("main_window")
             .expect("Could not get main_window from builder");
         main_window.set_application(Some(app));
+
+        // Set application icon for proper dock integration
+        main_window.set_icon_name(Some("com.cali666.lsfg-vk-ui"));
 
         let sidebar_list_box: gtk::ListBox = builder
             .object("sidebar_list_box")
@@ -400,7 +614,7 @@ fn main() -> glib::ExitCode {
                                 eprintln!("Failed to save config: {}", e);
                             }
                             
-                            state.populate_sidebar();
+                            state.populate_sidebar_with_handlers(Some(app_state_clone_dialog.clone()));
                             drop(state); // Explicitly drop the mutable borrow
 
                             // Defer the UI update to avoid potential re-entrancy during initial setup
@@ -449,7 +663,7 @@ fn main() -> glib::ExitCode {
             if let Some(index) = state.selected_profile_index {
                 if let Some(profile) = state.config.game.get_mut(index) {
                     if let Ok(value) = entry.text().parse::<f32>() {
-                        profile.flow_scale = value;
+                        profile.flow_scale = round_to_2_decimals(value);
                         // Removed save_config here
                     }
                 }
@@ -532,7 +746,7 @@ fn main() -> glib::ExitCode {
                     }
 
                     if let Ok(value) = flow_scale_text.parse::<f32>() {
-                        profile.flow_scale = value;
+                        profile.flow_scale = round_to_2_decimals(value);
                     }
 
                     profile.performance_mode = performance_mode_active;
@@ -570,14 +784,15 @@ fn main() -> glib::ExitCode {
         let app_state_clone_initial = app_state.clone();
         glib::idle_add_local(move || {
             let mut state = app_state_clone_initial.borrow_mut();
-            state.populate_sidebar();
             // Select the first profile if available, otherwise clear main window
             if state.config.game.first().is_some() {
                 state.selected_profile_index = Some(0);
-                drop(state); // Drop the mutable borrow
+            }
+            state.populate_sidebar_with_handlers(Some(app_state_clone_initial.clone())); // Populate after setting selection
+            drop(state); // Drop the mutable borrow
+            
+            if app_state_clone_initial.borrow().selected_profile_index.is_some() {
                 app_state_clone_initial.borrow().update_main_window_from_profile();
-            } else {
-                drop(state); // Drop if no profile
             }
             glib::ControlFlow::Break
         });
