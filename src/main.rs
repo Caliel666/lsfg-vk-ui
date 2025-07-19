@@ -415,12 +415,19 @@ fn main() -> glib::ExitCode {
 
     application.connect_startup(move |_app| { // Renamed app to _app
         // Load CSS for sidebar background
-        let provider = CssProvider::new();
-        provider.load_from_data(
-            ".sidebar-content {
-                background-color: #28282C;
-            }"
-        );
+let provider = CssProvider::new();
+provider.load_from_data(&format!(
+    ".sidebar {{
+        background-color: @theme_bg_color;
+    }}
+    
+    .sidebar-content {{
+        background-color: shade(@theme_bg_color, {});
+        color: @theme_fg_color;
+        padding: 12px;
+    }}",
+    0.95  // Slightly lighter/darker shade if needed
+));
         gtk::style_context_add_provider_for_display(
             &gtk::gdk::Display::default().expect("Could not connect to a display."),
             &provider,
