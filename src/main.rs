@@ -1,9 +1,8 @@
 // src/main.rs
 use gtk::prelude::*;
 use gtk::{glib, CssProvider, Builder, MessageDialog, Label}; // Added Label for feedback
-use libadwaita::prelude::*; // Corrected typo: Re-enabled for libadwaita types
-use libadwaita::{ApplicationWindow, NavigationView};
-// use libadwaita::adw; // Removed: 'adw' module is typically brought into scope by prelude
+use libadwaita::ApplicationWindow;
+// Removed: use libadwaita::NavigationPage; // This type is no longer directly used
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -60,7 +59,8 @@ struct AppState {
     hdr_mode_switch: gtk::Switch,
     experimental_present_mode_dropdown: gtk::DropDown,
     save_button: gtk::Button, // Added save button reference
-    main_content_page: NavigationView,
+    main_settings_box: gtk::Box, // Reference to the main content GtkBox (your 'main_box')
+    main_stack: gtk::Stack, // Reference to the GtkStack
     // Store SignalHandlerIds to block/unblock signals
     multiplier_dropdown_handler_id: Option<glib::SignalHandlerId>,
     flow_scale_entry_handler_id: Option<glib::SignalHandlerId>,
@@ -120,6 +120,10 @@ impl AppState {
                     self.experimental_present_mode_dropdown.set_selected(pos);
                 }
                 // Signal handlers are unblocked automatically when _guard_X go out of scope
+
+                // Switch to the settings page
+                self.main_stack.set_visible_child_name("settings_page");
+
             }
         } else {
             // Clear or disable main window elements if no profile is selected
@@ -128,6 +132,9 @@ impl AppState {
             self.performance_mode_switch.set_active(false);
             self.hdr_mode_switch.set_active(false);
             self.experimental_present_mode_dropdown.set_selected(0); // Default to first item
+
+            // Switch to the welcome page
+            self.main_stack.set_visible_child_name("welcome_page");
         }
     }
 
@@ -256,13 +263,23 @@ fn main() -> glib::ExitCode {
             .object("experimental_present_mode_dropdown")
             .expect("Could not get experimental_present_mode_dropdown from builder");
 
-        // Get the main_leaflet and main_content page
-        let main_leaflet: libadwaita::Leaflet = builder
-            .object("main_leaflet")
-            .expect("Could not get main_leaflet from builder");
-        let main_content_page: NavigationView = builder
-            .object("main_content") // The tag for the main content page
-            .expect("Could not get main_content page from builder");
+        // Get the GtkStack and GtkStackSwitcher
+        let main_stack: gtk::Stack = builder
+            .object("main_stack")
+            .expect("Could not get main_stack from builder. Ensure it has id='main_stack' in ui.ui.");
+        let main_stack_switcher: gtk::StackSwitcher = builder
+            .object("main_stack_switcher")
+            .expect("Could not get main_stack_switcher from builder. Ensure it has id='main_stack_switcher' in ui.ui.");
+        
+        // Connect the switcher to the stack
+        main_stack_switcher.set_stack(Some(&main_stack));
+
+
+        // Get the GtkBox that contains the settings (your 'main_box' from ui.ui)
+        let main_settings_box: gtk::Box = builder
+            .object("main_box")
+            .expect("Could not get main_box from builder");
+
 
         // Create the Save button
         let save_button = gtk::Button::builder()
@@ -272,21 +289,8 @@ fn main() -> glib::ExitCode {
             .margin_bottom(12)
             .build();
 
-        // Get the GtkBox that contains the settings (this is your 'main_box' from ui.ui)
-        // We need to get its current child to restore it later
-        let current_main_content_child = main_content_page.child().expect("Main content page must have a child");
-
-        // Append the save button to the main_box within the main_content_page's child
-        // Assuming the direct child of main_content_page is a GtkScrolledWindow, and its child is the GtkBox with id="main_box"
-        if let Some(scrolled_window) = current_main_content_child.downcast_ref::<gtk::ScrolledWindow>() {
-            if let Some(main_box_from_ui) = scrolled_window.child().and_then(|c| c.downcast_ref::<gtk::Box>()) {
-                main_box_from_ui.append(&save_button);
-            } else {
-                eprintln!("Could not find GtkBox as child of GtkScrolledWindow in main_content_page.");
-            }
-        } else {
-            eprintln!("Main content page's child is not a GtkScrolledWindow.");
-        }
+        // Append the save button to the main_settings_box
+        main_settings_box.append(&save_button);
 
 
         // Initialize application state (with None for handler IDs initially)
@@ -301,7 +305,8 @@ fn main() -> glib::ExitCode {
             hdr_mode_switch: hdr_mode_switch.clone(),
             experimental_present_mode_dropdown: experimental_present_mode_dropdown.clone(),
             save_button: save_button.clone(), // Store reference to save button
-            main_content_page: main_content_page.clone(), // Store reference to main_content_page
+            main_settings_box: main_settings_box.clone(), // Store reference to main_settings_box
+            main_stack: main_stack.clone(), // Store reference to main_stack
             multiplier_dropdown_handler_id: None,
             flow_scale_entry_handler_id: None,
             performance_mode_switch_handler_id: None,
@@ -545,13 +550,15 @@ fn main() -> glib::ExitCode {
                     feedback_label.set_margin_end(12);
                     feedback_label.set_margin_bottom(12);
                     
-                    let main_content_page_clone = state.main_content_page.clone(); // Clone main_content_page for the timeout closure
-                    let original_child = main_content_page_clone.child().expect("Main content page must have a child").clone(); // Get original child
+                    let main_settings_box_clone = state.main_settings_box.clone(); // Clone main_settings_box for the timeout closure
+                    
+                    // Temporarily add the feedback label to the main_settings_box
+                    main_settings_box_clone.append(&feedback_label);
 
-                    main_content_page_clone.set_child(Some(&feedback_label)); // Temporarily replace content with feedback
 
                     glib::timeout_add_local(std::time::Duration::new(2, 0), move || {
-                        main_content_page_clone.set_child(Some(&original_child)); // Revert to original content
+                        // Remove feedback label
+                        main_settings_box_clone.remove(&feedback_label);
                         glib::ControlFlow::Break
                     });
                 }
@@ -564,6 +571,7 @@ fn main() -> glib::ExitCode {
         glib::idle_add_local(move || {
             let mut state = app_state_clone_initial.borrow_mut();
             state.populate_sidebar();
+            // Select the first profile if available, otherwise clear main window
             if state.config.game.first().is_some() {
                 state.selected_profile_index = Some(0);
                 drop(state); // Drop the mutable borrow
