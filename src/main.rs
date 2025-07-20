@@ -197,6 +197,12 @@ fn main() -> glib::ExitCode {
 
             dialog.set_default_response(gtk::ResponseType::Other(1));
 
+            // Allow pressing Enter in the entry to trigger the "Create" button
+            let dialog_clone = dialog.clone();
+            entry.connect_activate(move |_| {
+                dialog_clone.response(gtk::ResponseType::Other(1));
+            });
+
             let app_state_clone_dialog = app_state_clone.clone();
             let entry_clone = entry.clone();
             dialog.connect_response(
