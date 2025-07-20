@@ -31,6 +31,7 @@ pub struct GlobalConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(default)]
 pub struct GameProfile {
     pub exe: String,
     pub multiplier: u32,
@@ -95,8 +96,17 @@ pub fn load_config() -> Result<Config, io::Error> {
     if config_path.exists() {
         let contents = fs::read_to_string(&config_path)?;
         println!("Successfully read config contents ({} bytes).", contents.len());
-        let mut config: Config = toml::from_str(&contents)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse TOML: {}", e)))?;
+        // Load configuration with default values when the format is invalid
+        let mut config: Config = toml::from_str(&contents).unwrap_or_else(|_| Config::default());
+
+        // Old way to load config
+        // let mut config: Config = toml::from_str(&contents).map_err(|e| {
+        //     io::Error::new(
+        //         io::ErrorKind::InvalidData,
+        //         format!("Failed to parse TOML: {}", e),
+        //     )
+        // })?;
+
         
         // Clean up any floating point precision issues in existing configs
         let mut needs_save = false;
