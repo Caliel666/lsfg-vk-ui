@@ -1,14 +1,13 @@
-// src/app_state.rs
 use gtk::prelude::*;
-use gtk::{glib, MessageDialog}; // Removed unused 'Label' import
+use gtk::{glib, MessageDialog};
 use libadwaita::ApplicationWindow;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::config::{Config, save_config}; // Removed unused 'GameProfile' import
-use crate::utils::round_to_2_decimals; // Import from utils module
+use crate::config::{Config, save_config};
+use crate::utils::round_to_2_decimals;
 
-#[allow(dead_code)] // Added to suppress warnings for unused fields
+#[allow(dead_code)]
 pub struct AppState {
     pub config: Config,
     pub selected_profile_index: Option<usize>,
@@ -105,6 +104,8 @@ impl AppState {
         while let Some(child) = self.sidebar_list_box.first_child() {
             self.sidebar_list_box.remove(&child);
         }
+
+        let mut row_to_select: Option<gtk::ListBoxRow> = None;
 
         for (i, profile) in self.config.game.iter().enumerate() {
             let row = gtk::ListBoxRow::new();
@@ -268,10 +269,19 @@ impl AppState {
             row.set_child(Some(&row_box));
             self.sidebar_list_box.append(&row);
 
-            // Set the selected state
+            // Mark the row to be selected later
             if self.selected_profile_index == Some(i) {
-                self.sidebar_list_box.select_row(Some(&row));
+                row_to_select = Some(row.clone()); // Clone the row to store it
             }
+        }
+
+        // Perform selection in a separate idle callback
+        if let Some(row) = row_to_select {
+            let list_box_clone = self.sidebar_list_box.clone();
+            glib::idle_add_local(move || {
+                list_box_clone.select_row(Some(&row));
+                glib::ControlFlow::Break
+            });
         }
     }
 }

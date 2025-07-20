@@ -1,4 +1,3 @@
-<!-- resources/ui.ui -->
 <?xml version="1.0" encoding="UTF-8"?>
 <interface>
   <!-- Define the main window directly as an object, with the ID for retrieval -->
@@ -16,6 +15,12 @@
                 <property name="title">Lossless Scaling Frame Generation</property>
               </object>
             </property>
+            <child type="end">
+              <object class="GtkButton" id="settings_button">
+                <property name="icon-name">org.gnome.Settings-symbolic</property>
+                <property name="tooltip-text">Settings</property>
+              </object>
+            </child>
           </object>
         </child>
         <property name="content">
@@ -309,21 +314,6 @@
                             <property name="css-classes">title-4</property>
                             <property name="wrap">true</property>
                             <property name="max-width-chars">50</property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkLabel">
-                            <property name="label">Select a profile from the sidebar or create a new one.</property>
-                            <property name="wrap">true</property>
-                            <property name="max-width-chars">50</property>
-                            <property name="margin-top">16</property>
-                          </object>
-                        </child>
-                        <child>
-                          <object class="GtkLinkButton">
-                            <property name="label">Documentation Wiki</property>
-                            <property name="uri">https://github.com/PancakeTAS/lsfg-vk/wiki</property>
-                            <property name="margin-top">8</property>
                           </object>
                         </child>
                         <child>

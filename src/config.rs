@@ -1,4 +1,3 @@
-// src/config.rs
 use serde::{Deserialize, Serialize};
 use std::{fs, io};
 use std::path::PathBuf;
@@ -12,8 +11,23 @@ use crate::utils::round_to_2_decimals; // Import from utils module
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct Config {
     pub version: u32, // Made public to be accessible from main.rs
+    #[serde(flatten)] // Flatten this struct into the parent, controlling order
+    pub ordered_global: OrderedGlobalConfig,
     #[serde(default)]
     pub game: Vec<GameProfile>,
+}
+
+// Helper struct to control the serialization order of global config
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct OrderedGlobalConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")] // Only serialize if Some
+    pub global: Option<GlobalConfig>,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
+pub struct GlobalConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")] // Only serialize if Some
+    pub dll: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -102,7 +116,7 @@ pub fn load_config() -> Result<Config, io::Error> {
         Ok(config)
     } else {
         println!("Config file not found at {:?}, creating default.", config_path);
-        Ok(Config { version: 1, game: Vec::new() })
+        Ok(Config { version: 1, ordered_global: OrderedGlobalConfig { global: None }, game: Vec::new() })
     }
 }
 

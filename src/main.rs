@@ -1,4 +1,3 @@
-// src/main.rs
 use gtk::prelude::*;
 use gtk::{glib, CssProvider, Builder, Label};
 use libadwaita::ApplicationWindow;
@@ -9,10 +8,12 @@ use std::rc::Rc;
 mod config;
 mod app_state;
 mod utils;
+mod settings_window;
 
-use config::load_config; // Removed unused 'save_config' import
+use config::load_config;
 use app_state::AppState;
-use utils::round_to_2_decimals; // Still needed for the initial config load's cleanup logic
+use utils::round_to_2_decimals;
+use config::OrderedGlobalConfig; // Import OrderedGlobalConfig
 
 fn main() -> glib::ExitCode {
     let application = libadwaita::Application::builder()
@@ -35,6 +36,10 @@ fn main() -> glib::ExitCode {
                 background-color: shade(@theme_bg_color, {});
                 color: @theme_fg_color;
                 padding: 12px;
+            }}\n
+            .linked-button-box {{
+                margin-top: 12px;
+                margin-bottom: 12px;
             }}",
             0.95
         ));
@@ -55,7 +60,8 @@ fn main() -> glib::ExitCode {
         // Load initial configuration
         let initial_config = load_config().unwrap_or_else(|e| {
             eprintln!("Error loading config: {}", e);
-            config::Config { version: 1, game: Vec::new() }
+            // Corrected Config initialization
+            config::Config { version: 1, ordered_global: OrderedGlobalConfig { global: None }, game: Vec::new() }
         });
 
         // Load UI from .ui file
@@ -67,6 +73,10 @@ fn main() -> glib::ExitCode {
             .object("main_window")
             .expect("Could not get main_window from builder");
         main_window.set_application(Some(app));
+
+        let settings_button: gtk::Button = builder
+            .object("settings_button")
+            .expect("Could not get settings_button from builder");
 
         // Set application icon for proper dock integration
         main_window.set_icon_name(Some("com.cali666.lsfg-vk-ui"));
@@ -138,6 +148,14 @@ fn main() -> glib::ExitCode {
         }));
 
         // --- Connect Signals ---
+
+        // Connect settings button
+        let main_window_clone = main_window.clone();
+        let app_state_clone_for_settings = app_state.clone(); // Clone for settings window
+        settings_button.connect_clicked(move |_| {
+            let settings_win = settings_window::create_settings_window(&main_window_clone, app_state_clone_for_settings.clone());
+            settings_win.present();
+        });
 
         let app_state_clone = app_state.clone();
         sidebar_list_box.connect_row_activated(move |_list_box, row| {
