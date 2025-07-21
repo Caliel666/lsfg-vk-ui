@@ -1,0 +1,37 @@
+name: Build for Fedora
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies and Build
+        shell: bash
+        run: |
+          # Install build dependencies
+          dnf install -y gtk4-devel libadwaita-devel gcc pkg-config openssl-devel curl git
+          
+          # Install Rust
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+
+          # Build
+          cargo build --release
+
+      - name: Upload binary as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsfg-vk-ui-fedora-x86_64
+          path: target/release/lsfg-vk-ui
