@@ -1,0 +1,63 @@
+name: Build and Release AppImage
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ 'v*' ] # Trigger on version tags like v0.1.0
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-appimage:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies for GTK4/libadwaita
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-4-dev \
+            libadwaita-1-dev \
+            build-essential \
+            pkg-config \
+            desktop-file-utils
+
+      - name: Get App Version from Cargo.toml
+        id: get_version
+        run: echo "app_version=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_OUTPUT
+
+      - name: Run build script
+        run: |
+          chmod +x ./build-appimage.sh
+          ./build-appimage.sh
+
+      - name: Upload AppImage as build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lsfg-vk-ui-appimage
+          path: lsfg-vk-ui-${{ steps.get_version.outputs.app_version }}-x86_64.AppImage
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lsfg-vk-ui-${{ steps.get_version.outputs.app_version }}-x86_64.AppImage
