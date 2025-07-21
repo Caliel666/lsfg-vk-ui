@@ -324,6 +324,13 @@
                             <property name="margin-top">24</property>
                           </object>
                         </child>
+                        <child>
+                          <object class="GtkLinkButton">
+                            <property name="label">For more information refer to the lsfg-vk wiki</property>
+                            <property name="uri">https://github.com/PancakeTAS/lsfg-vk/wiki</property>
+                            <property name="margin-top">12</property>
+                          </object>
+                        </child>
                       </object>
                     </property>
                   </object>
