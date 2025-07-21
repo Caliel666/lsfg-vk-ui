@@ -48,6 +48,26 @@ cp "target/release/${APP_NAME}" "${APPDIR}/usr/bin/"
 cp "resources/${APP_ID}.desktop" "${APPDIR}/usr/share/applications/"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png"
 
+# --- Bundle symbolic icons to ensure they are available ---
+echo -e "${YELLOW}Bundling required symbolic icons...${NC}"
+ICON_DEST_DIR="${APPDIR}/usr/share/icons/hicolor/scalable/actions"
+mkdir -p "${ICON_DEST_DIR}"
+
+# List of icons to bundle. Using standard Adwaita/GNOME icons ensures they
+# are found on the build runner and provides a consistent look.
+ICONS_TO_BUNDLE=(
+    "org.gnome.Settings-symbolic.svg"
+    "document-edit-symbolic.svg"
+    "edit-delete-symbolic.svg"
+)
+
+for icon_name in "${ICONS_TO_BUNDLE[@]}"; do
+    find /usr/share/icons -name "${icon_name}" -print -quit | while read -r icon_path; do
+        echo "Found icon to bundle: ${icon_path}"
+        cp "${icon_path}" "${ICON_DEST_DIR}/"
+    done
+done
+
 # Create a dynamic metainfo file
 cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
 <?xml version="1.0" encoding="UTF-8"?>

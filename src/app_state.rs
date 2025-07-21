@@ -129,14 +129,14 @@ impl AppState {
 
             // Edit button
             let edit_button = gtk::Button::builder()
-                .label("🖊")
+                .icon_name("document-edit-symbolic")
                 .css_classes(["flat", "circular"])
                 .tooltip_text("Edit profile name")
                 .build();
 
             // Remove button
             let remove_button = gtk::Button::builder()
-                .label("✕")
+                .icon_name("edit-delete-symbolic")
                 .css_classes(["flat", "circular", "destructive-action"])
                 .tooltip_text("Remove profile")
                 .build();
