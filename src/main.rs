@@ -28,7 +28,11 @@ fn main() -> glib::ExitCode {
         // Load CSS for sidebar background
         let provider = CssProvider::new();
         provider.load_from_data(&format!(
-            ".sidebar {{
+            ".settings-icon-button {{
+                font-size: 1.4rem;
+            }}
+
+            .sidebar {{
                 background-color: @theme_bg_color;
             }}
             

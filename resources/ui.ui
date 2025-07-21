@@ -17,8 +17,9 @@
             </property>
             <child type="end">
               <object class="GtkButton" id="settings_button">
-                <property name="icon-name">org.gnome.Settings-symbolic</property>
+                <property name="label">✇</property>
                 <property name="tooltip-text">Settings</property>
+                <property name="css-classes">settings-icon-button</property>
               </object>
             </child>
           </object>
