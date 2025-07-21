@@ -13,6 +13,12 @@ APP_NAME="lsfg-vk-ui"
 APP_ID="com.cali666.lsfg-vk-ui"
 # Dynamically get version from Cargo.toml to name the output file
 APP_VERSION=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+
+if [ -z "$APP_VERSION" ]; then
+    echo -e "${RED}Error: Could not determine app version from Cargo.toml.${NC}"
+    exit 1
+fi
+
 FINAL_APPIMAGE_NAME="${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
 
 echo -e "${GREEN}Building ${APP_NAME} AppImage v${APP_VERSION}...${NC}"
