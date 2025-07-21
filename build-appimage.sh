@@ -62,11 +62,20 @@ ICONS_TO_BUNDLE=(
 )
 
 for icon_name in "${ICONS_TO_BUNDLE[@]}"; do
-    find /usr/share/icons -name "${icon_name}" -print -quit | while read -r icon_path; do
-        echo "Found icon to bundle: ${icon_path}"
+    icon_path=$(find /usr/share/icons -name "${icon_name}" -print -quit)
+    if [ -n "$icon_path" ]; then
+        echo "Found icon to bundle: ${icon_path} -> ${ICON_DEST_DIR}/"
         cp "${icon_path}" "${ICON_DEST_DIR}/"
-    done
+    else
+        echo -e "${RED}Error: Could not find required icon '${icon_name}' on the build system.${NC}"
+        echo -e "${RED}This might mean the 'adwaita-icon-theme' package is missing or incomplete.${NC}"
+        exit 1
+    fi
 done
+
+# --- 4. Update Icon Cache ---
+echo -e "${YELLOW}Updating icon cache to make bundled icons discoverable...${NC}"
+gtk-update-icon-cache -f -t "${APPDIR}/usr/share/icons/hicolor"
 
 # Create a dynamic metainfo file
 cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
@@ -98,21 +107,21 @@ cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
 </component>
 EOF
 
-# --- 4. Download Deployment Tools ---
+# --- 5. Download Deployment Tools ---
 echo -e "${YELLOW}Downloading linuxdeploy and plugins...${NC}"
 wget -qc "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
 # Per your request, using the raw file from the master branch for the GTK plugin.
 wget -qc "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh"
 chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 
-# --- 5. Patch GTK Plugin ---
+# --- 6. Patch GTK Plugin ---
 echo -e "${YELLOW}Patching GTK plugin to use libadwaita's default theme...${NC}"
 # By commenting out the line that sets GTK_THEME in the plugin's generated hook,
 # we allow libadwaita to use its own built-in theme. This correctly handles
 # light/dark modes and avoids visual glitches from bundling incomplete system themes.
 sed -i 's|export GTK_THEME="\$APPIMAGE_GTK_THEME"|# &|' linuxdeploy-plugin-gtk.sh
 
-# --- 6. Run linuxdeploy to Bundle Dependencies ---
+# --- 7. Run linuxdeploy to Bundle Dependencies ---
 echo -e "${YELLOW}Bundling dependencies and creating AppImage...${NC}"
 
 # Run linuxdeploy. It will find the desktop file, icon, and executable.
@@ -128,7 +137,7 @@ NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
 GENERATED_APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy-x86_64.AppImage" -print -quit)
 mv "${GENERATED_APPIMAGE}" "${FINAL_APPIMAGE_NAME}"
 
-# --- 7. Final Cleanup ---
+# --- 8. Final Cleanup ---
 echo -e "${YELLOW}Cleaning up build directories...${NC}"
 rm -rf AppDir linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 
