@@ -40,7 +40,7 @@ jobs:
             build-essential \
             pkg-config \
             desktop-file-utils \
-            adwaita-icon-theme \
+            adwaita-icon-theme-full \
             libgtk-4-bin
 
       - name: Get App Version from Cargo.toml
