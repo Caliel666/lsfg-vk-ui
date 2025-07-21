@@ -39,7 +39,8 @@ jobs:
             libadwaita-1-dev \
             build-essential \
             pkg-config \
-            desktop-file-utils
+            desktop-file-utils \
+            adwaita-icon-theme
 
       - name: Get App Version from Cargo.toml
         id: get_version
