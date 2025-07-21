@@ -48,30 +48,20 @@ cp "target/release/${APP_NAME}" "${APPDIR}/usr/bin/"
 cp "resources/${APP_ID}.desktop" "${APPDIR}/usr/share/applications/"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png"
 
-# --- Bundle symbolic icons to ensure they are available ---
-echo -e "${YELLOW}Bundling required symbolic icons...${NC}"
+# --- Bundle symbolic icons from local resources ---
+echo -e "${YELLOW}Bundling required symbolic icons from local resources...${NC}"
+ICON_SOURCE_DIR="resources/icons/symbolic"
 ICON_DEST_DIR="${APPDIR}/usr/share/icons/hicolor/scalable/actions"
 mkdir -p "${ICON_DEST_DIR}"
 
-# List of icons to bundle. Using standard Adwaita/GNOME icons ensures they
-# are found on the build runner and provides a consistent look.
-ICONS_TO_BUNDLE=(
-    "org.gnome.Settings-symbolic.svg"
-    "document-edit-symbolic.svg"
-    "edit-delete-symbolic.svg"
-)
+if [ ! -d "${ICON_SOURCE_DIR}" ] || [ -z "$(ls -A ${ICON_SOURCE_DIR} 2>/dev/null)" ]; then
+    echo -e "${RED}Error: The local icon directory '${ICON_SOURCE_DIR}' is missing or empty.${NC}"
+    echo -e "${RED}Please create it and add the required .svg icon files before building.${NC}"
+    exit 1
+fi
 
-for icon_name in "${ICONS_TO_BUNDLE[@]}"; do
-    icon_path=$(find /usr/share/icons -name "${icon_name}" -print -quit)
-    if [ -n "$icon_path" ]; then
-        echo "Found icon to bundle: ${icon_path} -> ${ICON_DEST_DIR}/"
-        cp "${icon_path}" "${ICON_DEST_DIR}/"
-    else
-        echo -e "${RED}Error: Could not find required icon '${icon_name}' on the build system.${NC}"
-        echo -e "${RED}This might mean the 'adwaita-icon-theme' package is missing or incomplete.${NC}"
-        exit 1
-    fi
-done
+echo "Copying icons from ${ICON_SOURCE_DIR} to ${ICON_DEST_DIR}..."
+cp "${ICON_SOURCE_DIR}"/*.svg "${ICON_DEST_DIR}/"
 
 # --- 4. Update Icon Cache ---
 echo -e "${YELLOW}Updating icon cache to make bundled icons discoverable...${NC}"
