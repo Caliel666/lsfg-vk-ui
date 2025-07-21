@@ -1,7 +1,7 @@
 use gtk::prelude::*;
 use gtk::{glib, CssProvider, Builder, Label};
 use libadwaita::ApplicationWindow;
-use libadwaita::prelude::AdwApplicationWindowExt; // Added missing trait import
+use libadwaita::prelude::AdwApplicationWindowExt;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -14,7 +14,7 @@ mod settings_window;
 use config::load_config;
 use app_state::AppState;
 use utils::round_to_2_decimals;
-use config::OrderedGlobalConfig; // Import OrderedGlobalConfig
+use config::OrderedGlobalConfig;
 
 fn main() -> glib::ExitCode {
     let application = libadwaita::Application::builder()
