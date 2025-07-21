@@ -1,6 +1,7 @@
 use gtk::prelude::*;
 use gtk::{glib, CssProvider, Builder, Label};
 use libadwaita::ApplicationWindow;
+use libadwaita::prelude::AdwApplicationWindowExt; // Added missing trait import
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -182,20 +183,34 @@ fn main() -> glib::ExitCode {
                 gtk::DialogFlags::MODAL,
                 gtk::MessageType::Question,
                 gtk::ButtonsType::None,
-                "Enter the new profile name:",
+                "",
             );
-            dialog.set_title(Some("New LSFG-VK Profile"));
-            dialog.set_secondary_text(Some("This should be the process name of the application, e.g., `helldivers2.exe`."));
+            dialog.set_title(Some("New Profile"));
+            dialog.set_secondary_text(Some("Enter or browse Application Name"));
 
             let entry = gtk::Entry::builder()
-                .placeholder_text("Process Name")
+                .placeholder_text("Application Name")
+                .hexpand(true)
+                .build();
+            
+            let pick_process_button = gtk::Button::builder()
+                .label("🖵")
+                .tooltip_text("Pick a running Vulkan process")
+                .css_classes(["flat", "square", "icon-button"])
+                .build();
+
+            let entry_box = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(6)
                 .margin_top(12)
                 .margin_bottom(12)
                 .margin_start(12)
                 .margin_end(12)
                 .build();
-            
-            dialog.content_area().append(&entry);
+            entry_box.append(&entry);
+            entry_box.append(&pick_process_button);
+
+            dialog.content_area().append(&entry_box);
 
             dialog.add_button("Cancel", gtk::ResponseType::Cancel);
             dialog.add_button("Create", gtk::ResponseType::Other(1));
@@ -207,6 +222,86 @@ fn main() -> glib::ExitCode {
             entry.connect_activate(move |_| {
                 dialog_clone.response(gtk::ResponseType::Other(1));
             });
+
+            // --- Process Picker Button Logic ---
+            let entry_clone_for_picker = entry.clone();
+            let main_window_clone_for_picker = app_state_clone.borrow().main_window.clone();
+
+            pick_process_button.connect_clicked(move |_| {
+                let process_picker_window = libadwaita::ApplicationWindow::builder()
+                    .title("Select Process")
+                    .transient_for(&main_window_clone_for_picker)
+                    .modal(true)
+                    .default_width(400)
+                    .default_height(600)
+                    .build();
+
+                let scrolled_window = gtk::ScrolledWindow::builder()
+                    .hscrollbar_policy(gtk::PolicyType::Never)
+                    .vscrollbar_policy(gtk::PolicyType::Automatic)
+                    .hexpand(true) // Make the scrolled window expand horizontally
+                    .vexpand(true) // Make the scrolled window expand vertically
+                    .margin_top(12)
+                    .margin_start(12)
+                    .margin_end(12)
+                    .build();
+                
+                let process_list_box = gtk::ListBox::builder()
+                    .selection_mode(gtk::SelectionMode::Single)
+                    .build();
+                scrolled_window.set_child(Some(&process_list_box));
+
+                let content_box = gtk::Box::builder()
+                    .orientation(gtk::Orientation::Vertical)
+                    .build();
+                content_box.append(&scrolled_window); // Add scrolled window first to take up space
+
+                let close_button = gtk::Button::builder()
+                    .label("Close")
+                    .halign(gtk::Align::End)
+                    .margin_end(12)
+                    .margin_bottom(12)
+                    .build();
+                content_box.append(&close_button); // Add close button at the bottom
+
+                process_picker_window.set_content(Some(&content_box));
+
+                // Populate the list with processes
+                let processes = utils::get_vulkan_processes(); // Call the new function from utils.rs
+                for proc_name in processes {
+                    let row = gtk::ListBoxRow::new();
+                    let label = gtk::Label::builder()
+                        .label(&proc_name)
+                        .halign(gtk::Align::Start)
+                        .margin_start(12)
+                        .margin_end(12)
+                        .margin_top(8)
+                        .margin_bottom(8)
+                        .build();
+                    row.set_child(Some(&label));
+                    process_list_box.append(&row);
+                }
+
+                // Connect selection handler
+                let entry_clone_for_select = entry_clone_for_picker.clone();
+                let picker_window_clone = process_picker_window.clone();
+                process_list_box.connect_row_activated(move |_list_box, row| {
+                    if let Some(label_widget) = row.child().and_then(|c| c.downcast::<gtk::Label>().ok()) {
+                        let process_name = label_widget.label().to_string();
+                        entry_clone_for_select.set_text(&process_name);
+                        picker_window_clone.close();
+                    }
+                });
+
+                // Connect close button
+                let picker_window_clone_for_close = process_picker_window.clone();
+                close_button.connect_clicked(move |_| {
+                    picker_window_clone_for_close.close();
+                });
+
+                process_picker_window.present();
+            });
+            // --- End Process Picker Button Logic ---
 
             let app_state_clone_dialog = app_state_clone.clone();
             let entry_clone = entry.clone();
