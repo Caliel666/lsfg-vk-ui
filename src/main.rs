@@ -182,12 +182,13 @@ fn main() -> glib::ExitCode {
                 gtk::DialogFlags::MODAL,
                 gtk::MessageType::Question,
                 gtk::ButtonsType::None,
-                "Enter the name for the new game profile:",
+                "Enter the new profile name:",
             );
-            dialog.set_title(Some("Create New Game Profile"));
+            dialog.set_title(Some("New LSFG-VK Profile"));
+            dialog.set_secondary_text(Some("This should be the process name of the application, e.g., `helldivers2.exe`."));
 
             let entry = gtk::Entry::builder()
-                .placeholder_text("Game Name")
+                .placeholder_text("Process Name")
                 .margin_top(12)
                 .margin_bottom(12)
                 .margin_start(12)
