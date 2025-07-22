@@ -39,6 +39,7 @@ APPDIR="AppDir"
 mkdir -p "${APPDIR}/usr/bin"
 mkdir -p "${APPDIR}/usr/share/applications"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
+mkdir -p "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
 mkdir -p "${APPDIR}/usr/share/metainfo"
 
 # Copy binary
@@ -47,6 +48,10 @@ cp "target/release/${APP_NAME}" "${APPDIR}/usr/bin/"
 # Copy desktop file and icon
 cp "resources/${APP_ID}.desktop" "${APPDIR}/usr/share/applications/"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png"
+
+# Create a scalable SVG version of the icon for better integration
+# For now, we'll copy the PNG to scalable as well (ideally you'd have an SVG)
+cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/${APP_ID}.png"
 
 # Create a dynamic metainfo file
 cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
@@ -99,11 +104,45 @@ echo -e "${YELLOW}Bundling dependencies and creating AppImage...${NC}"
 # The GTK plugin will automatically find and bundle libadwaita and other GTK-specific files.
 # By setting NO_STRIP=1, we prevent linuxdeploy from using its internal `strip` command,
 # which can be too old to understand modern ELF sections like .relr.dyn on newer systems.
+# We also ensure that icon themes are properly bundled for symbolic icons to work
 LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib \
 NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
     --appdir "${APPDIR}" \
     --plugin gtk \
     --output appimage
+
+# --- 6.1. Post-process to ensure symbolic icons work ---
+echo -e "${YELLOW}Post-processing for better icon support...${NC}"
+
+# Create icon cache for the bundled icons
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache "${APPDIR}/usr/share/icons/hicolor" 2>/dev/null || true
+fi
+
+# Ensure the AppRun script sets up icon theme paths properly
+if [ -f "${APPDIR}/AppRun" ]; then
+    # Create a backup of the original AppRun
+    cp "${APPDIR}/AppRun" "${APPDIR}/AppRun.orig"
+    
+    # Create a new AppRun that sets up icon paths
+    cat > "${APPDIR}/AppRun" << 'EOF'
+#!/bin/bash
+# AppRun script for proper icon theme support
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+
+# Set up icon theme paths for symbolic icons
+export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export GTK_DATA_PREFIX="${HERE}/usr"
+
+# Set up additional paths for libadwaita
+export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas:${GSETTINGS_SCHEMA_DIR}"
+
+# Execute the original AppRun
+exec "${HERE}/AppRun.orig" "$@"
+EOF
+    chmod +x "${APPDIR}/AppRun"
+fi
 
 GENERATED_APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy-x86_64.AppImage" -print -quit)
 mv "${GENERATED_APPIMAGE}" "${FINAL_APPIMAGE_NAME}"

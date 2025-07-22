@@ -9,7 +9,7 @@ pub fn round_to_2_decimals(value: f32) -> f32 {
 
 /// Executes a bash command to find running processes that use Vulkan
 /// and are owned by the current user.
-/// Returns a vector of process names.
+/// Returns a vector of process descriptions with PID and name.
 pub fn get_vulkan_processes() -> Vec<String> {
     let mut processes = Vec::new();
     let command_str = r#"
@@ -19,7 +19,7 @@ pub fn get_vulkan_processes() -> Vec<String> {
                 if grep -qi 'vulkan' "$pid/maps" 2>/dev/null; then
                     procname=$(cat "$pid/comm" 2>/dev/null)
                     if [[ -n "$procname" ]]; then
-                        printf "%s\n" "$procname" # Only print the process name
+                        printf "PID %s: %s\n" "$(basename "$pid")" "$procname"
                     fi
                 fi
             fi
@@ -38,10 +38,10 @@ pub fn get_vulkan_processes() -> Vec<String> {
                 // Read stdout line by line
                 let reader = BufReader::new(output.stdout.as_slice());
                 for line in reader.lines() {
-                    if let Ok(proc_name) = line {
-                        let trimmed_name = proc_name.trim().to_string();
-                        if !trimmed_name.is_empty() {
-                            processes.push(trimmed_name);
+                    if let Ok(proc_info) = line {
+                        let trimmed_info = proc_info.trim().to_string();
+                        if !trimmed_info.is_empty() {
+                            processes.push(trimmed_info);
                         }
                     }
                 }
@@ -57,3 +57,4 @@ pub fn get_vulkan_processes() -> Vec<String> {
     }
     processes
 }
+
