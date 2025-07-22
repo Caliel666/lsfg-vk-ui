@@ -10,7 +10,9 @@ on:
 jobs:
   build-appimage:
     runs-on: ubuntu-latest
-    container: fedora:latest
+    container:
+      image: fedora:latest
+      options: --privileged
 
     steps:
       - name: Checkout repository
