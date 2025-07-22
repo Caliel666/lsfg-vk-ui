@@ -50,10 +50,19 @@ cp "resources/${APP_ID}.desktop" "${APPDIR}/usr/share/applications/"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png"
 
 # Create a scalable SVG version of the icon for better integration
-# For now, we'll copy the PNG to scalable as well (ideally you'd have an SVG)
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/${APP_ID}.png"
 
-# Create a dynamic metainfo file
+# --- 3.1 Copy system icons ---
+echo -e "${YELLOW}Copying system icons...${NC}"
+mkdir -p "${APPDIR}/usr/share/icons"
+# Copy Adwaita icons (GTK's default theme)
+cp -r /usr/share/icons/Adwaita "${APPDIR}/usr/share/icons"
+# Copy hicolor icons (fallback theme)
+cp -r /usr/share/icons/hicolor "${APPDIR}/usr/share/icons"
+# Copy symbolic icons (needed for libadwaita)
+cp -r /usr/share/icons/Adwaita-symbolic "${APPDIR}/usr/share/icons" || echo -e "${YELLOW}Warning: Adwaita-symbolic icons not found, continuing without them${NC}"
+
+# Create metainfo file (keep your existing code here)
 cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
