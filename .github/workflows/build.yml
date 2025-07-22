@@ -10,6 +10,7 @@ on:
 jobs:
   build-appimage:
     runs-on: ubuntu-latest
+    container: fedora:latest
 
     steps:
       - name: Checkout repository
@@ -33,15 +34,14 @@ jobs:
 
       - name: Install system dependencies for GTK4/libadwaita
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev \
-            libadwaita-1-dev \
-            build-essential \
-            pkg-config \
+          sudo dnf install -y \
+            gtk4-devel \
+            libadwaita-devel \
+            gcc \
+            make \
+            pkgconf \
             desktop-file-utils \
-            adwaita-icon-theme-full \
-            libgtk-4-bin
+            adwaita-icon-theme
 
       - name: Get App Version from Cargo.toml
         id: get_version
