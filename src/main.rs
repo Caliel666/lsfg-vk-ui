@@ -1,135 +1,175 @@
-#!/bin/bash
+use gtk::prelude::*;
+use gtk::{glib, Builder};
+use libadwaita::ApplicationWindow;
+use std::cell::RefCell;
+use std::rc::Rc;
 
-set -e
+// Import modules
+mod config;
+mod app_state;
+mod utils;
+mod settings_window;
+mod ui_helpers;
+mod ui_components;
+mod profile_manager;
+mod signal_handlers;
+mod styling;
+mod styles;
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+use config::{load_config, Config, OrderedGlobalConfig};
+use app_state::AppState;
+use ui_components::WidgetUtils;
+use signal_handlers::{
+    connect_profile_signal_handlers, connect_save_button_handler,
+    connect_sidebar_row_activated_handler, connect_create_profile_button_handler
+};
+use styles::{apply_application_styles, setup_icon_theme};
 
-# --- Configuration ---
-APP_NAME="lsfg-vk-ui"
-APP_ID="com.cali666.lsfg-vk-ui"
-APP_VERSION=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+fn main() -> glib::ExitCode {
+    let application = libadwaita::Application::builder()
+        .application_id("com.cali666.lsfg-vk-ui")
+        .build();
+    
+    // Set the desktop file name for proper GNOME integration
+    glib::set_application_name("LSFG-VK UI");
+    glib::set_prgname(Some("lsfg-vk-ui"));
 
-if [ -z "$APP_VERSION" ]; then
-    echo -e "${RED}Error: Could not determine app version from Cargo.toml.${NC}"
-    exit 1
-fi
+    application.connect_startup(|_app| {
+        apply_application_styles();
+        setup_icon_theme();
+    });
 
-FINAL_APPIMAGE_NAME="${APP_NAME}-${APP_VERSION}-x86_64.AppImage"
+    application.connect_activate(|app| {
+        if let Err(e) = setup_main_window(app) {
+            eprintln!("Failed to setup main window: {}", e);
+        }
+    });
 
-echo -e "${GREEN}Building ${APP_NAME} AppImage v${APP_VERSION}...${NC}"
-echo -e "${BLUE}Made by Cali666 • 2025${NC}"
-echo ""
+    application.run()
+}
 
-# --- 1. Cleanup ---
-echo -e "${YELLOW}Cleaning up previous builds...${NC}"
-rm -rf AppDir *.AppImage linuxdeploy*.AppImage linuxdeploy-plugin-gtk.sh
+fn setup_main_window(app: &libadwaita::Application) -> Result<(), Box<dyn std::error::Error>> {
+    // Load initial configuration
+    let initial_config = load_config().unwrap_or_else(|e| {
+        eprintln!("Error loading config: {}", e);
+        Config {
+            version: 1,
+            ordered_global: OrderedGlobalConfig { global: None },
+            game: Vec::new()
+        }
+    });
 
-# --- 2. Build Rust App ---
-echo -e "${YELLOW}Building Rust application in release mode...${NC}"
-cargo build --release
+    // Load UI from .ui file
+    let ui_bytes = include_bytes!("../resources/ui.ui");
+    let builder = Builder::from_string(std::str::from_utf8(ui_bytes)?);
 
-# --- 3. Prepare AppDir ---
-echo -e "${YELLOW}Setting up AppDir structure...${NC}"
-APPDIR="AppDir"
-mkdir -p "${APPDIR}/usr/bin"
-mkdir -p "${APPDIR}/usr/share/applications"
-mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
-mkdir -p "${APPDIR}/usr/share/metainfo"
+    // Get widgets from builder
+    let widgets = extract_widgets_from_builder(&builder)?;
+    
+    // Set up main window
+    widgets.main_window.set_application(Some(app));
+    widgets.main_window.set_icon_name(Some("com.cali666.lsfg-vk-ui"));
 
-# Copy binary
-cp "target/release/${APP_NAME}" "${APPDIR}/usr/bin/"
+    // Create save button
+    let save_button = gtk::Button::builder()
+        .label("Save Changes")
+        .halign(gtk::Align::End)
+        .margin_end(12)
+        .margin_bottom(12)
+        .build();
+    widgets.main_settings_box.append(&save_button);
 
-# Copy desktop file and icon
-cp "resources/${APP_ID}.desktop" "${APPDIR}/usr/share/applications/"
-cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png"
+    // Initialize application state
+    let app_state = Rc::new(RefCell::new(AppState {
+        config: initial_config,
+        selected_profile_index: None,
+        main_window: widgets.main_window.clone(),
+        sidebar_list_box: widgets.sidebar_list_box.clone(),
+        multiplier_dropdown: widgets.multiplier_dropdown.clone(),
+        flow_scale_entry: widgets.flow_scale_entry.clone(),
+        performance_mode_switch: widgets.performance_mode_switch.clone(),
+        hdr_mode_switch: widgets.hdr_mode_switch.clone(),
+        experimental_present_mode_dropdown: widgets.experimental_present_mode_dropdown.clone(),
+        save_button: save_button.clone(),
+        main_settings_box: widgets.main_settings_box.clone(),
+        multiplier_dropdown_handler_id: None,
+        flow_scale_entry_handler_id: None,
+        performance_mode_switch_handler_id: None,
+        hdr_mode_switch_handler_id: None,
+        experimental_present_mode_dropdown_handler_id: None,
+    }));
 
-# Create metainfo file (same as before)
-cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<component type="desktop-application">
-  <id>${APP_ID}</id>
-  <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
-  <name>LSFG-VK UI</name>
-  <summary>Lossless Scaling Frame Generation Configuration Tool</summary>
-  <description>
-    <p>
-      A configuration tool for Lossless Scaling Frame Generation, allowing you to create and manage game profiles with custom settings.
-    </p>
-  </description>
-  <developer_name>Cali666</developer_name>
-  <url type="homepage">https://github.com/PancakeTAS/lsfg-vk</url>
-  <categories>
-    <category>Game</category>
-    <category>Utility</category>
-  </categories>
-  <releases>
-    <release version="${APP_VERSION}" date="$(date +%Y-%m-%d)">
-      <description>
-        <p>New release.</p>
-      </description>
-    </release>
-  </releases>
-</component>
-EOF
+    // Connect all signal handlers
+    connect_signal_handlers(&widgets, &app_state, &save_button);
 
-# --- 4. Download Deployment Tools ---
-echo -e "${YELLOW}Downloading linuxdeploy and plugins...${NC}"
-wget -qc "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-wget -qc "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh"
-chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
+    // Initialize UI
+    initialize_ui(&app_state);
 
-# --- 5. Patch GTK Plugin ---
-echo -e "${YELLOW}Patching GTK plugin...${NC}"
-# Disable theme bundling and icon bundling
-sed -i 's|export GTK_THEME="\$APPIMAGE_GTK_THEME"|# &|' linuxdeploy-plugin-gtk.sh
+    widgets.main_window.present();
+    Ok(())
+}
 
-# --- 6. Create wrapper script to set up environment ---
-echo -e "${YELLOW}Creating wrapper script...${NC}"
-cat > "${APPDIR}/AppRun" << 'EOF'
-#!/bin/bash
+struct AppWidgets {
+    main_window: ApplicationWindow,
+    settings_button: gtk::Button,
+    sidebar_list_box: gtk::ListBox,
+    create_profile_button: gtk::Button,
+    multiplier_dropdown: gtk::DropDown,
+    flow_scale_entry: gtk::Entry,
+    performance_mode_switch: gtk::Switch,
+    hdr_mode_switch: gtk::Switch,
+    experimental_present_mode_dropdown: gtk::DropDown,
+    main_settings_box: gtk::Box,
+}
 
-# Set up environment for system icons
-export XDG_DATA_DIRS="${APPDIR}/usr/share:${XDG_DATA_DIRS}:/usr/local/share:/usr/share"
-export GTK_THEME=Adwaita
-export ICON_THEME=Adwaita
+fn extract_widgets_from_builder(builder: &Builder) -> Result<AppWidgets, String> {
+    Ok(AppWidgets {
+        main_window: WidgetUtils::get_widget_from_builder(builder, "main_window")?,
+        settings_button: WidgetUtils::get_widget_from_builder(builder, "settings_button")?,
+        sidebar_list_box: WidgetUtils::get_widget_from_builder(builder, "sidebar_list_box")?,
+        create_profile_button: WidgetUtils::get_widget_from_builder(builder, "create_profile_button")?,
+        multiplier_dropdown: WidgetUtils::get_widget_from_builder(builder, "multiplier_dropdown")?,
+        flow_scale_entry: WidgetUtils::get_widget_from_builder(builder, "flow_scale_entry")?,
+        performance_mode_switch: WidgetUtils::get_widget_from_builder(builder, "performance_mode_switch")?,
+        hdr_mode_switch: WidgetUtils::get_widget_from_builder(builder, "hdr_mode_switch")?,
+        experimental_present_mode_dropdown: WidgetUtils::get_widget_from_builder(builder, "experimental_present_mode_dropdown")?,
+        main_settings_box: WidgetUtils::get_widget_from_builder(builder, "main_box")?,
+    })
+}
 
-# Find the executable
-HERE="$(dirname "$(readlink -f "${0}")")"
-exec "$HERE/usr/bin/lsfg-vk-ui" "$@"
-EOF
-chmod +x "${APPDIR}/AppRun"
+fn connect_signal_handlers(
+    widgets: &AppWidgets,
+    app_state: &Rc<RefCell<AppState>>,
+    save_button: &gtk::Button,
+) {
+    // Connect settings button
+    let main_window_clone = widgets.main_window.clone();
+    let app_state_clone = app_state.clone();
+    widgets.settings_button.connect_clicked(move |_| {
+        let settings_win = settings_window::create_settings_window(&main_window_clone, app_state_clone.clone());
+        settings_win.present();
+    });
 
-# --- 7. Run linuxdeploy ---
-echo -e "${YELLOW}Bundling dependencies and creating AppImage...${NC}"
+    // Connect profile-related signal handlers
+    connect_profile_signal_handlers(app_state);
+    connect_save_button_handler(save_button, app_state);
+    connect_sidebar_row_activated_handler(&widgets.sidebar_list_box, app_state);
+    connect_create_profile_button_handler(&widgets.create_profile_button, app_state);
+}
 
-# Tell linuxdeploy not to bundle icons or themes
-export NO_BUNDLE_ICONS=1
-export NO_BUNDLE_THEMES=1
-
-# Run linuxdeploy
-LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib \
-NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
-    --appdir "${APPDIR}" \
-    --plugin gtk \
-    --output appimage
-
-GENERATED_APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy-x86_64.AppImage" -print -quit)
-mv "${GENERATED_APPIMAGE}" "${FINAL_APPIMAGE_NAME}"
-
-# --- 8. Final Cleanup ---
-echo -e "${YELLOW}Cleaning up build directories...${NC}"
-rm -rf AppDir linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
-
-# --- Success Message ---
-echo ""
-echo -e "${GREEN}✓ AppImage built successfully: ${FINAL_APPIMAGE_NAME}${NC}"
-echo -e "${GREEN}✓ File size: $(du -h "${FINAL_APPIMAGE_NAME}" | cut -f1)${NC}"
-echo ""
-echo -e "${BLUE}Usage:${NC}"
-echo "  chmod +x ${FINAL_APPIMAGE_NAME}"
-echo "  ./${FINAL_APPIMAGE_NAME}"
+fn initialize_ui(app_state: &Rc<RefCell<AppState>>) {
+    let app_state_clone = app_state.clone();
+    glib::idle_add_local(move || {
+        let mut state = app_state_clone.borrow_mut();
+        if state.config.game.first().is_some() {
+            state.selected_profile_index = Some(0);
+        }
+        state.populate_sidebar_with_handlers(Some(app_state_clone.clone()));
+        drop(state);
+        
+        if app_state_clone.borrow().selected_profile_index.is_some() {
+            app_state_clone.borrow().update_main_window_from_profile();
+        }
+        glib::ControlFlow::Break
+    });
+}

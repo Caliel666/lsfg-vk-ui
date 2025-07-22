@@ -11,7 +11,6 @@ NC='\033[0m' # No Color
 # --- Configuration ---
 APP_NAME="lsfg-vk-ui"
 APP_ID="com.cali666.lsfg-vk-ui"
-# Dynamically get version from Cargo.toml to name the output file
 APP_VERSION=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
 
 if [ -z "$APP_VERSION" ]; then
@@ -39,7 +38,6 @@ APPDIR="AppDir"
 mkdir -p "${APPDIR}/usr/bin"
 mkdir -p "${APPDIR}/usr/share/applications"
 mkdir -p "${APPDIR}/usr/share/icons/hicolor/256x256/apps"
-mkdir -p "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
 mkdir -p "${APPDIR}/usr/share/metainfo"
 
 # Copy binary
@@ -49,11 +47,7 @@ cp "target/release/${APP_NAME}" "${APPDIR}/usr/bin/"
 cp "resources/${APP_ID}.desktop" "${APPDIR}/usr/share/applications/"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png"
 
-# Create a scalable SVG version of the icon for better integration
-# For now, we'll copy the PNG to scalable as well (ideally you'd have an SVG)
-cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/${APP_ID}.png"
-
-# Create a dynamic metainfo file
+# Create metainfo file (same as before)
 cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
@@ -86,28 +80,38 @@ EOF
 # --- 4. Download Deployment Tools ---
 echo -e "${YELLOW}Downloading linuxdeploy and plugins...${NC}"
 wget -qc "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-# Per your request, using the raw file from the master branch for the GTK plugin.
 wget -qc "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh"
 chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 
 # --- 5. Patch GTK Plugin ---
-echo -e "${YELLOW}Patching GTK plugin to use libadwaita's default theme...${NC}"
-# By commenting out the line that sets GTK_THEME in the plugin's generated hook,
-# we allow libadwaita to use its own built-in theme. This correctly handles
-# light/dark modes and avoids visual glitches from bundling incomplete system themes.
+echo -e "${YELLOW}Patching GTK plugin...${NC}"
+# Disable theme bundling and icon bundling
 sed -i 's|export GTK_THEME="\$APPIMAGE_GTK_THEME"|# &|' linuxdeploy-plugin-gtk.sh
 
-# --- 6. Run linuxdeploy to Bundle Dependencies ---
+# --- 6. Create wrapper script to set up environment ---
+echo -e "${YELLOW}Creating wrapper script...${NC}"
+cat > "${APPDIR}/AppRun" << 'EOF'
+#!/bin/bash
+
+# Set up environment for system icons
+export XDG_DATA_DIRS="${APPDIR}/usr/share:${XDG_DATA_DIRS}:/usr/local/share:/usr/share"
+export GTK_THEME=Adwaita
+export ICON_THEME=Adwaita
+
+# Find the executable
+HERE="$(dirname "$(readlink -f "${0}")")"
+exec "$HERE/usr/bin/lsfg-vk-ui" "$@"
+EOF
+chmod +x "${APPDIR}/AppRun"
+
+# --- 7. Run linuxdeploy ---
 echo -e "${YELLOW}Bundling dependencies and creating AppImage...${NC}"
 
-# To use system icons and prevent the GTK plugin from bundling icon themes,
-# we set NO_BUNDLE_ICONS=1. This is similar to how we handle themes.
+# Tell linuxdeploy not to bundle icons or themes
 export NO_BUNDLE_ICONS=1
+export NO_BUNDLE_THEMES=1
 
-# Run linuxdeploy. It will find the desktop file, icon, and executable.
-# The GTK plugin will automatically find and bundle libadwaita and other GTK-specific files.
-# By setting NO_STRIP=1, we prevent linuxdeploy from using its internal `strip` command,
-# which can be too old to understand modern ELF sections like .relr.dyn on newer systems.
+# Run linuxdeploy
 LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib \
 NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
     --appdir "${APPDIR}" \
@@ -117,7 +121,7 @@ NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
 GENERATED_APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy-x86_64.AppImage" -print -quit)
 mv "${GENERATED_APPIMAGE}" "${FINAL_APPIMAGE_NAME}"
 
-# --- 7. Final Cleanup ---
+# --- 8. Final Cleanup ---
 echo -e "${YELLOW}Cleaning up build directories...${NC}"
 rm -rf AppDir linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 
