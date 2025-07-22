@@ -42,7 +42,8 @@ jobs:
             pkgconf \
             desktop-file-utils \
             adwaita-icon-theme \
-            wget
+            wget \
+            fuse-libs
 
       - name: Get App Version from Cargo.toml
         id: get_version
