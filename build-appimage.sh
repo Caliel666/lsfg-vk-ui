@@ -96,6 +96,7 @@ chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 echo -e "${YELLOW}Patching GTK plugin to exclude gdk-pixbuf...${NC}"
 
 # Create a modified version of the GTK plugin that skips pixbuf handling
+# This part is largely correct, but we'll try to be more aggressive in exclusions.
 sed -i '/GDK PixBufs/,/^\s*done\s*$/d' linuxdeploy-plugin-gtk.sh
 sed -i '/gdk-pixbuf/d' linuxdeploy-plugin-gtk.sh
 sed -i '/GDK_PIXBUF_MODULE_FILE/d' linuxdeploy-plugin-gtk.sh
@@ -104,11 +105,14 @@ sed -i '/GDK_PIXBUF_MODULEDIR/d' linuxdeploy-plugin-gtk.sh
 # --- 6. Run linuxdeploy to Bundle Dependencies ---
 echo -e "${YELLOW}Bundling dependencies and creating AppImage...${NC}"
 
-# Create a custom environment without pixbuf
-export GDK_PIXBUF_MODULE_FILE=""
-export GDK_PIXBUF_MODULEDIR=""
+# Set up an environment variable for linuxdeploy to explicitly exclude
+# common gdk-pixbuf related paths and files.
+# This is a more direct way to influence what linuxdeploy bundles.
+export EXCLUDE_GLIB_SCHEMAS="gdk-pixbuf"
+export EXCLUDE_GSETTINGS_SCHEMAS="gdk-pixbuf"
 
 # Run linuxdeploy with explicit library exclusions
+# Add more specific exclusions for GTK and GDK if they are still being bundled
 LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib \
 NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
     --appdir "${APPDIR}" \
@@ -116,21 +120,26 @@ NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
     --exclude-library "libgdk_pixbuf*.so*" \
     --exclude-library "libgdk-*.so*" \
     --exclude-library "libgtk-*.so*" \
+    --exclude-file "/usr/share/locale/*/LC_MESSAGES/gdk-pixbuf-*.mo" \
+    --exclude-file "/usr/share/doc/libgdk-pixbuf-2.0-0*" \
+    --exclude-file "/usr/share/glib-2.0/schemas/gschemas.compiled" \
+    --exclude-file "/usr/lib/x86_64-linux-gnu/gdk-pixbuf-2.0/*" \
     --output appimage
 
 # --- 6.1. Post-process to ensure proper environment ---
 echo -e "${YELLOW}Post-processing for proper environment setup...${NC}"
 
-# Clean up any accidentally bundled pixbuf files
-echo -e "${YELLOW}Removing gdk-pixbuf related files...${NC}"
-find "${APPDIR}" -name "*gdk_pixbuf*" -type f -delete
-find "${APPDIR}" -name "*gdk-*" -type f -delete
-find "${APPDIR}" -name "*gtk-*" -type f -delete
-
-# Remove empty directories that might have contained these files
-find "${APPDIR}" -name "*gdk_pixbuf*" -type d -empty -delete
-find "${APPDIR}" -name "*gdk-*" -type d -empty -delete
-find "${APPDIR}" -name "*gtk-*" -type d -empty -delete
+# Aggressive removal of all gdk-pixbuf, gtk, and gdk related files/directories
+# This ensures that even if linuxdeploy misses something, we clean it up.
+echo -e "${YELLOW}Removing gdk-pixbuf, gtk, and gdk related files and directories...${NC}"
+find "${APPDIR}" -depth -type f -name "*gdk_pixbuf*" -delete
+find "${APPDIR}" -depth -type f -name "*gdk-*.so*" -delete
+find "${APPDIR}" -depth -type f -name "*gtk-*.so*" -delete
+find "${APPDIR}" -depth -type d -name "*gdk-pixbuf*" -exec rm -rf {} +
+find "${APPDIR}" -depth -type d -name "*gdk-*" -exec rm -rf {} +
+find "${APPDIR}" -depth -type d -name "*gtk-*" -exec rm -rf {} +
+# Also clean up any empty directories left behind
+find "${APPDIR}" -depth -type d -empty -delete
 
 # Create a new AppRun that sets up the environment without pixbuf
 if [ -f "${APPDIR}/AppRun" ]; then
@@ -161,11 +170,6 @@ exec "${HERE}/AppRun.orig" "$@"
 EOF
     chmod +x "${APPDIR}/AppRun"
 fi
-
-# Clean up any accidentally bundled pixbuf files
-find "${APPDIR}" -name "*gdk_pixbuf*" -delete
-find "${APPDIR}" -name "*gdk-*" -delete
-find "${APPDIR}" -name "*gtk-*" -delete
 
 GENERATED_APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy-x86_64.AppImage" -print -quit)
 mv "${GENERATED_APPIMAGE}" "${FINAL_APPIMAGE_NAME}"
