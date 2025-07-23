@@ -8,58 +8,73 @@ on:
     branches: [ "main" ]
 
 jobs:
-  build-appimage:
-    runs-on: ubuntu-latest
+  build:
+    name: "${{ matrix.name }} (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            name: "Build AppImage"
+            arch: x86_64
+#          - runs-on: ubuntu-24.04-arm
+#            name: "Build AppImage"
+#            arch: aarch64
+    container: ghcr.io/pkgforge-dev/archlinux:latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Cargo dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Install system dependencies for GTK4/libadwaita
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            libgtk-4-dev \
-            libadwaita-1-dev \
-            build-essential \
-            pkg-config \
-            desktop-file-utils \
-            adwaita-icon-theme-full \
-            hicolor-icon-theme \
-            libgtk-4-bin
-
-      - name: Get App Version from Cargo.toml
-        id: get_version
-        run: echo "app_version=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')" >> $GITHUB_OUTPUT
+      - name: Install system dependencies for GTK4/libadwaita and build ui
+        run: chmod +x ./get-dependencies.sh && ./get-dependencies.sh
 
       - name: Run build script
+        run: chmod +x ./lsfg-ui-appimage.sh && ./lsfg-ui-appimage.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: AppImage-${{ matrix.arch }}
+          path: 'dist'
+
+      - name: Upload version file
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: version
+          path: ~/version
+          overwrite: true
+
+  release:
+    if: ${{ github.ref_name == 'main' }}
+    needs: [build]
+    permissions: write-all
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: AppImage-x86_64
+
+#      - uses: actions/download-artifact@v4.3.0
+#        with:
+#          name: AppImage-aarch64
+
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          name: version
+
+      - name: Read version and Get date
         run: |
-          chmod +x ./build-appimage.sh
-          ./build-appimage.sh
+          echo "VERSION=$(cat version)" >> "${GITHUB_ENV}"
+          echo "DATE=$(date +'%Y-%m-%d_%s')" >> "${GITHUB_ENV}"
 
-      - name: Upload AppImage as build artifact
-        uses: actions/upload-artifact@v4
+      - name: Release Artifacts
+        uses: softprops/action-gh-release@v2.2.2
         with:
-          name: lsfg-vk-ui-appimage
-          path: lsfg-vk-ui-${{ steps.get_version.outputs.app_version }}-x86_64.AppImage
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: lsfg-vk-ui-${{ steps.get_version.outputs.app_version }}-x86_64.AppImage
+          name: "lsfg-vk-ui: ${{ env.VERSION }}"
+          tag_name: "${{ env.VERSION }}@${{ env.DATE }}"
+          prerelease: false
+          draft: false
+          generate_release_notes: false
+          make_latest: true
+          files: |
+            *.AppImage*
