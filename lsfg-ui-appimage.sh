@@ -7,9 +7,38 @@ URUNTIME="https://github.com/VHSgunzo/uruntime/releases/latest/download/uruntime
 URUNTIME_LITE="https://github.com/VHSgunzo/uruntime/releases/latest/download/uruntime-appimage-dwarfs-lite-$ARCH"
 UPINFO="gh-releases-zsync|$(echo $GITHUB_REPOSITORY | tr '/' '|')|latest|*$ARCH.AppImage.zsync"
 SHARUN="https://github.com/VHSgunzo/sharun/releases/latest/download/sharun-$ARCH-aio"
-
 VERSION=$(awk -F'=|"' '/^version/{print $3}' ./Cargo.toml)
 echo "$VERSION" > ~/version
+
+case "$ARCH" in
+	'x86_64')
+		PKG_TYPE='x86_64.pkg.tar.zst'
+		;;
+	'aarch64')
+		PKG_TYPE='aarch64.pkg.tar.xz'
+		;;
+	''|*)
+		echo "Unknown cpu arch: $ARCH"
+		exit 1
+		;;
+esac
+
+LIBXML_URL="https://github.com/pkgforge-dev/llvm-libs-debloated/releases/download/continuous/libxml2-iculess-$PKG_TYPE"
+MESA_URL="https://github.com/pkgforge-dev/llvm-libs-debloated/releases/download/continuous/mesa-mini-$PKG_TYPE"
+LLVM_URL="https://github.com/pkgforge-dev/llvm-libs-debloated/releases/download/continuous/llvm-libs-nano-$PKG_TYPE"
+
+# We need to build here before installing debloated packages because the rust compiler hates the smaller llvm
+cargo build --release
+
+echo "Installing debloated pckages..."
+wget --retry-connrefused --tries=30 "$LIBXML_URL" -O  ./libxml2.pkg.tar.zst
+wget --retry-connrefused --tries=30 "$LLVM_URL"   -O  ./llvm-libs.pkg.tar.zst
+wget --retry-connrefused --tries=30 "$MESA_URL"   -O  ./mesa.pkg.tar.zst
+
+pacman -U --noconfirm ./*.pkg.tar.zst
+rm -f ./*.pkg.tar.zst
+
+echo "Deploying AppDir..."
 
 # deploy dependencies
 mkdir -p ./AppDir/shared/bin
