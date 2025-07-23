@@ -93,22 +93,29 @@ wget -qc "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/m
 chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 
 # --- 5. Patch GTK Plugin ---
-echo -e "${YELLOW}Patching GTK plugin to exclude gdk-pixbuf and set up environment...${NC}"
+echo -e "${YELLOW}Patching GTK plugin to exclude gdk-pixbuf...${NC}"
 
-# Modify the GTK plugin to not set up pixbuf
-sed -i 's|export GTK_THEME="\$APPIMAGE_GTK_THEME"|# &|' linuxdeploy-plugin-gtk.sh
+# Create a modified version of the GTK plugin that skips pixbuf handling
+sed -i '/GDK PixBufs/,/^\s*done\s*$/d' linuxdeploy-plugin-gtk.sh
 sed -i '/gdk-pixbuf/d' linuxdeploy-plugin-gtk.sh
+sed -i '/GDK_PIXBUF_MODULE_FILE/d' linuxdeploy-plugin-gtk.sh
+sed -i '/GDK_PIXBUF_MODULEDIR/d' linuxdeploy-plugin-gtk.sh
 
 # --- 6. Run linuxdeploy to Bundle Dependencies ---
 echo -e "${YELLOW}Bundling dependencies and creating AppImage...${NC}"
 
-# Run linuxdeploy with the exclusion list and custom environment
+# Create a custom environment without pixbuf
+export GDK_PIXBUF_MODULE_FILE=""
+export GDK_PIXBUF_MODULEDIR=""
+
+# Run linuxdeploy with explicit library exclusions
 LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib \
 NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
     --appdir "${APPDIR}" \
     --plugin gtk \
     --exclude-library "libgdk_pixbuf*.so*" \
-    --exclude-library "gdk-pixbuf*.so*" \
+    --exclude-library "libgdk-*.so*" \
+    --exclude-library "libgtk-*.so*" \
     --output appimage
 
 # --- 6.1. Post-process to ensure proper environment ---
@@ -145,7 +152,8 @@ fi
 
 # Clean up any accidentally bundled pixbuf files
 find "${APPDIR}" -name "*gdk_pixbuf*" -delete
-find "${APPDIR}" -name "*gdk-pixbuf*" -delete
+find "${APPDIR}" -name "*gdk-*" -delete
+find "${APPDIR}" -name "*gtk-*" -delete
 
 GENERATED_APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy-x86_64.AppImage" -print -quit)
 mv "${GENERATED_APPIMAGE}" "${FINAL_APPIMAGE_NAME}"
