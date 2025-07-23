@@ -11,7 +11,6 @@ NC='\033[0m' # No Color
 # --- Configuration ---
 APP_NAME="lsfg-vk-ui"
 APP_ID="com.cali666.lsfg-vk-ui"
-# Dynamically get version from Cargo.toml to name the output file
 APP_VERSION=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
 
 if [ -z "$APP_VERSION" ]; then
@@ -48,21 +47,16 @@ cp "target/release/${APP_NAME}" "${APPDIR}/usr/bin/"
 # Copy desktop file and icon
 cp "resources/${APP_ID}.desktop" "${APPDIR}/usr/share/applications/"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png"
-
-# Create a scalable SVG version of the icon for better integration
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/${APP_ID}.png"
 
 # --- 3.1 Copy system icons ---
 echo -e "${YELLOW}Copying system icons...${NC}"
 mkdir -p "${APPDIR}/usr/share/icons"
-# Copy Adwaita icons (GTK's default theme)
 cp -r /usr/share/icons/Adwaita "${APPDIR}/usr/share/icons"
-# Copy hicolor icons (fallback theme)
 cp -r /usr/share/icons/hicolor "${APPDIR}/usr/share/icons"
-# Copy symbolic icons (needed for libadwaita)
 cp -r /usr/share/icons/Adwaita-symbolic "${APPDIR}/usr/share/icons" || echo -e "${YELLOW}Warning: Adwaita-symbolic icons not found, continuing without them${NC}"
 
-# Create metainfo file (keep your existing code here)
+# Create metainfo file
 cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
@@ -95,57 +89,62 @@ EOF
 # --- 4. Download Deployment Tools ---
 echo -e "${YELLOW}Downloading linuxdeploy and plugins...${NC}"
 wget -qc "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-# Per your request, using the raw file from the master branch for the GTK plugin.
 wget -qc "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh"
 chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 
 # --- 5. Patch GTK Plugin ---
-echo -e "${YELLOW}Patching GTK plugin to use libadwaita's default theme...${NC}"
-# By commenting out the line that sets GTK_THEME in the plugin's generated hook,
-# we allow libadwaita to use its own built-in theme. This correctly handles
-# light/dark modes and avoids visual glitches from bundling incomplete system themes.
+echo -e "${YELLOW}Patching GTK plugin to exclude gdk-pixbuf and set up environment...${NC}"
+
+# Create a custom exclusion list for linuxdeploy
+cat > exclude.list << 'EOF'
+libgdk_pixbuf*
+gdk-pixbuf*
+*/gdk-pixbuf*
+*/libgdk_pixbuf*
+EOF
+
+# Modify the GTK plugin to not set up pixbuf
 sed -i 's|export GTK_THEME="\$APPIMAGE_GTK_THEME"|# &|' linuxdeploy-plugin-gtk.sh
+sed -i '/gdk-pixbuf/d' linuxdeploy-plugin-gtk.sh
 
 # --- 6. Run linuxdeploy to Bundle Dependencies ---
 echo -e "${YELLOW}Bundling dependencies and creating AppImage...${NC}"
 
-# Run linuxdeploy. It will find the desktop file, icon, and executable.
-# The GTK plugin will automatically find and bundle libadwaita and other GTK-specific files.
-# By setting NO_STRIP=1, we prevent linuxdeploy from using its internal `strip` command,
-# which can be too old to understand modern ELF sections like .relr.dyn on newer systems.
-# We also ensure that icon themes are properly bundled for symbolic icons to work
+# Run linuxdeploy with the exclusion list and custom environment
 LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib \
 NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
     --appdir "${APPDIR}" \
     --plugin gtk \
+    --exclude-lib "libgdk_pixbuf" \
+    --exclude-lib "gdk-pixbuf" \
+    --blacklist exclude.list \
     --output appimage
 
-# --- 6.1. Post-process to ensure symbolic icons work ---
-echo -e "${YELLOW}Post-processing for better icon support...${NC}"
+# --- 6.1. Post-process to ensure proper environment ---
+echo -e "${YELLOW}Post-processing for proper environment setup...${NC}"
 
-# Create icon cache for the bundled icons
-if command -v gtk-update-icon-cache >/dev/null 2>&1; then
-    gtk-update-icon-cache "${APPDIR}/usr/share/icons/hicolor" 2>/dev/null || true
-fi
-
-# Ensure the AppRun script sets up icon theme paths properly
+# Create a new AppRun that sets up the environment without pixbuf
 if [ -f "${APPDIR}/AppRun" ]; then
     # Create a backup of the original AppRun
     cp "${APPDIR}/AppRun" "${APPDIR}/AppRun.orig"
     
-    # Create a new AppRun that sets up icon paths
+    # Create a new AppRun with our custom environment
     cat > "${APPDIR}/AppRun" << 'EOF'
 #!/bin/bash
-# AppRun script for proper icon theme support
+# Custom AppRun script without gdk-pixbuf support
 
 HERE="$(dirname "$(readlink -f "${0}")")"
 
-# Set up icon theme paths for symbolic icons
+# Set up icon theme paths
 export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 export GTK_DATA_PREFIX="${HERE}/usr"
 
-# Set up additional paths for libadwaita
+# Set up libadwaita paths
 export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas:${GSETTINGS_SCHEMA_DIR}"
+
+# Explicitly disable gdk-pixbuf module loading
+unset GDK_PIXBUF_MODULE_FILE
+unset GDK_PIXBUF_MODULEDIR
 
 # Execute the original AppRun
 exec "${HERE}/AppRun.orig" "$@"
@@ -153,12 +152,16 @@ EOF
     chmod +x "${APPDIR}/AppRun"
 fi
 
+# Clean up any accidentally bundled pixbuf files
+find "${APPDIR}" -name "*gdk_pixbuf*" -delete
+find "${APPDIR}" -name "*gdk-pixbuf*" -delete
+
 GENERATED_APPIMAGE=$(find . -maxdepth 1 -name "*.AppImage" ! -name "linuxdeploy-x86_64.AppImage" -print -quit)
 mv "${GENERATED_APPIMAGE}" "${FINAL_APPIMAGE_NAME}"
 
 # --- 7. Final Cleanup ---
 echo -e "${YELLOW}Cleaning up build directories...${NC}"
-rm -rf AppDir linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
+rm -rf AppDir linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh exclude.list
 
 # --- Success Message ---
 echo ""
