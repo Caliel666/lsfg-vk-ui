@@ -121,8 +121,20 @@ NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
 # --- 6.1. Post-process to ensure proper environment ---
 echo -e "${YELLOW}Post-processing for proper environment setup...${NC}"
 
+# Clean up any accidentally bundled pixbuf files
+echo -e "${YELLOW}Removing gdk-pixbuf related files...${NC}"
+find "${APPDIR}" -name "*gdk_pixbuf*" -type f -delete
+find "${APPDIR}" -name "*gdk-*" -type f -delete
+find "${APPDIR}" -name "*gtk-*" -type f -delete
+
+# Remove empty directories that might have contained these files
+find "${APPDIR}" -name "*gdk_pixbuf*" -type d -empty -delete
+find "${APPDIR}" -name "*gdk-*" -type d -empty -delete
+find "${APPDIR}" -name "*gtk-*" -type d -empty -delete
+
 # Create a new AppRun that sets up the environment without pixbuf
 if [ -f "${APPDIR}/AppRun" ]; then
+    echo -e "${YELLOW}Creating custom AppRun...${NC}"
     # Create a backup of the original AppRun
     cp "${APPDIR}/AppRun" "${APPDIR}/AppRun.orig"
     
