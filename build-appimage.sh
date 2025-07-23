@@ -6,9 +6,8 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# --- Configuration ---
 APP_NAME="lsfg-vk-ui"
 APP_ID="com.cali666.lsfg-vk-ui"
 APP_VERSION=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
@@ -24,15 +23,12 @@ echo -e "${GREEN}Building ${APP_NAME} AppImage v${APP_VERSION} (Manual Build)...
 echo -e "${BLUE}Made by Cali666 • 2025${NC}"
 echo ""
 
-# --- 1. Cleanup ---
 echo -e "${YELLOW}Cleaning up previous builds...${NC}"
 rm -rf AppDir *.AppImage appimagetool-x86_64.AppImage
 
-# --- 2. Build Rust App ---
 echo -e "${YELLOW}Building Rust application in release mode...${NC}"
 cargo build --release
 
-# --- 3. Prepare AppDir Structure ---
 echo -e "${YELLOW}Setting up AppDir structure...${NC}"
 APPDIR="AppDir"
 mkdir -p "${APPDIR}/usr/bin"
@@ -43,26 +39,23 @@ mkdir -p "${APPDIR}/usr/share/icons/hicolor/scalable/apps"
 mkdir -p "${APPDIR}/usr/share/icons/scalable/apps"
 mkdir -p "${APPDIR}/usr/share/metainfo"
 mkdir -p "${APPDIR}/usr/share/themes"
-mkdir -p "${APPDIR}/usr/share/glib-2.0/schemas" # For GSettings schemas
-mkdir -p "${APPDIR}/usr/share/locale" # For translations
+mkdir -p "${APPDIR}/usr/share/glib-2.0/schemas"
+mkdir -p "${APPDIR}/usr/share/locale"
 
-# Copy binary
 cp "target/release/${APP_NAME}" "${APPDIR}/usr/bin/"
 
-# Copy desktop file and icon
 cp "resources/${APP_ID}.desktop" "${APPDIR}/usr/share/applications/"
+cp "resources/${APP_ID}.desktop" "${APPDIR}"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/256x256/apps/${APP_ID}.png"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/hicolor/scalable/apps/${APP_ID}.png"
 cp "resources/icons/lsfg-vk.png" "${APPDIR}/usr/share/icons/scalable/apps/${APP_ID}.png"
-cp "resources/icons/lsfg-vk.png" "${APPDIR}/.DirIcon" # AppImage thumbnail icon
+cp "resources/icons/lsfg-vk.png" "${APPDIR}/${APP_ID}.png"
+cp "resources/icons/lsfg-vk.png" "${APPDIR}/.DirIcon"
 
-# --- 3.1 Copy System Icons ---
 echo -e "${YELLOW}Copying system icons...${NC}"
 cp -r /usr/share/icons/Adwaita "${APPDIR}/usr/share/icons/" || true
 cp -r /usr/share/icons/hicolor "${APPDIR}/usr/share/icons/" || true
-cp -r /usr/share/icons/Adwaita-symbolic "${APPDIR}/usr/share/icons/" || echo -e "${YELLOW}Warning: Adwaita-symbolic icons not found, continuing without them${NC}"
 
-# --- 3.2 Create Metainfo File ---
 echo -e "${YELLOW}Creating metainfo file...${NC}"
 cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -93,104 +86,115 @@ cat > "${APPDIR}/usr/share/metainfo/${APP_ID}.metainfo.xml" << EOF
 </component>
 EOF
 
-# --- 4. Manually Copy Libraries (including libadwaita) ---
+LIB_PATH_PREFIX="/usr/lib/x86_64-linux-gnu"
+if [ ! -d "${LIB_PATH_PREFIX}" ]; then
+    echo -e "${YELLOW}Warning: ${LIB_PATH_PREFIX} not found. Falling back to /usr/lib/${NC}"
+    LIB_PATH_PREFIX="/usr/lib"
+fi
+
 echo -e "${YELLOW}Manually copying required libraries...${NC}"
 
-# Global array to keep track of copied libraries to avoid redundant checks/copies
-declare -A COPIED_LIBS
+# Declare associative arrays globally to ensure persistence across subshells
+declare -A COPIED_PATHS        # Tracks libraries that have been successfully copied to AppDir
+declare -A ALL_DEPENDENCIES    # Tracks all unique, non-excluded dependencies identified for copying
+declare -A PROCESSED_FOR_DEPS  # Tracks libraries whose direct dependencies have already been processed (ldd run)
 
-# Function to copy a library and its direct dependencies
-copy_library_with_deps() {
-    local lib_path="$1"
-    local dest_dir="$2"
-    local lib_basename=$(basename "$lib_path")
+# Helper function to get direct dependencies of a library, resolving paths and applying exclusions
+get_library_deps() {
+    lib_path="$1"
+    resolved_lib_path=$(readlink -f "$lib_path")
+    lib_basename=$(basename "$resolved_lib_path")
+    deps=""
 
-    # If already copied, skip
-    if [[ -n "${COPIED_LIBS[$lib_basename]}" ]]; then
-        return 0
-    fi
-    
-    # Check if the library path is a symbolic link and resolve it to its real path
-    if [ -L "$lib_path" ]; then
-        lib_path=$(readlink -f "$lib_path")
-        lib_basename=$(basename "$lib_path") # Update basename after resolving symlink
-    fi
+    # Define excluded patterns for system libraries
+    excluded_patterns="
+        libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|libutil.so.*|
+        libnsl.so.*|libnss_.*.so.*|libresolv.so.*|libanl.so.*|ld-linux-x86-64.so.*|
+        libwayland-.*.so.*|libX.*.so.*|libxcb.*.so.*|libdbus.*.so.*|libudev.so.*|
+        libsystemd.so.*|libappindicator.*.so.*|libayatana-appindicator.*.so.*|
+        libdbus-.*.so.*|libz.so.*|liblzma.so.*|libbz2.so.*|libgcrypt.so.*|
+        libgpg-error.so.*|libssl.so.*|libgcc_s.so.*|libstdc++.so.*|
+        libgdk_pixbuf.*.so.*|libgdk-pixbuf.*.so.*|.*gdk-pixbuf.*|libcap.so.*|
+        libattr.so.*|libacl.so.*|libselinux.so.*|libtirpc.so.*|libmount.so.*|
+        libuuid.so.*|libblkid.so.*|libffi.so.*|libkeyutils.so.*|libaudit.so.*|
+        libjson-c.so.*|libxml2.so.*|libxslt.so.*|libexpat.so.*|libelf.so.*|
+        libunwind.so.*|libdw.so.*|libnuma.so.*|libjemalloc.so.*|libtcmalloc.so.*|
+        libm.so.*
+    "
+    excluded_patterns=$(echo "$excluded_patterns" | tr -d '[:space:]')
 
-    # Check if the library file actually exists before attempting to copy
-    if [ ! -f "$lib_path" ]; then
-        echo -e "${YELLOW}Warning: Library file not found - $lib_path${NC}"
-        return 1 # Indicate failure so the caller can handle it (e.g., || true)
-    fi
+    # Run ldd and filter dependencies
+    ldd "$resolved_lib_path" 2>/dev/null | grep -oP '=> \K(/[^[:space:]]+)' | \
+        while read -r dep_lib; do
+            resolved_dep_lib=$(readlink -f "$dep_lib")
+            dep_basename=$(basename "$resolved_dep_lib")
 
-    # Explicitly exclude common system libraries that should not be bundled
-    case "$lib_basename" in
-        # Basic C/Unix/Kernel libraries - almost always provided by the OS
-        libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libutil.so*|libnsl.so*|libnss_*.so*|libresolv.so*|libanl.so*|ld-linux-x86-64.so*|\
-        # Desktop environment/system specifics (e.g., Wayland, X11, D-Bus, etc.)
-        libwayland-*.so*|libX*.so*|libxcb*.so*|libdbus*.so*|libudev.so*|libsystemd.so*|libappindicator*.so*|libayatana-appindicator*.so*|libdbus-*.so*|\
-        # Common compression/archive/crypto libs often system provided
-        libz.so*|liblzma.so*|libbz2.so*|libgcrypt.so*|libgpg-error.so*|libcrypto.so*|libssl.so*|\
-        # GCC runtime libs
-        libgcc_s.so*|libstdc++.so*|\
-        # GDK-Pixbuf and problematic GTK/GDK components
-        libgdk_pixbuf*.so*|libgdk-pixbuf*.so*|*gdk-pixbuf*|\
-        # Some general purpose ones that are almost always system-provided
-        libcap.so*|libattr.so*|libacl.so*|libselinux.so*|libtirpc.so*|libmount.so*|libuuid.so*|libblkid.so*|libffi.so*|libkeyutils.so*|libaudit.so*|libjson-c.so*|libxml2.so*|libxslt.so*|libexpat.so*|libelf.so*|libunwind.so*|libdw.so*|libnuma.so*|libjemalloc.so*|libtcmalloc.so*|libm.so*)
-            echo "  Skipping common system lib: $lib_basename"
-            COPIED_LIBS[$lib_basename]=1 # Mark as "handled" to avoid re-processing
-            return 0
-            ;;
-        *)
-            # Continue with copy
-            ;;
-    esac
-
-    # Copy the library to the AppDir/usr/lib
-    cp "$lib_path" "${dest_dir}/$lib_basename"
-    echo "  Copied: $lib_basename"
-    COPIED_LIBS[$lib_basename]=1 # Mark as copied
-
-    # Get its direct dependencies recursively
-    # Use 'grep -oP' with lookbehind to extract only the path, avoid other parts of ldd output
-    # Exclude common system libraries and gdk-pixbuf directly from ldd output parsing
-    ldd "$lib_path" 2>/dev/null | grep -oP '=> \K(/[^[:space:]]+)' | grep -v 'libgdk_pixbuf' | grep -v 'libgdk-pixbuf' | while read -r dep_lib; do
-        copy_library_with_deps "$dep_lib" "$dest_dir" || true # Continue even if dep is ignored/missing
-    done
+            if [[ "$dep_basename" =~ ^($excluded_patterns)$ ]]; then
+                continue # Skip common system dependencies
+            fi
+            deps="$deps $resolved_dep_lib"
+        done
+    echo "$deps" # Return space-separated list of dependencies
 }
 
-# --- IMPORTANT: Carefully select your initial REQUIRED_LIBS ---
-# Start with your application's binary, then core GTK4/Adwaita libraries.
-# Only include libraries here that you know are ABSOLUTELY necessary and
-# which you want to be the starting point for dependency resolution.
-echo -e "${BLUE}  Copying core application and GTK/GLib/Adwaita dependencies:${NC}"
+echo -e "${BLUE}  Collecting all necessary application and GTK/GLib/Adwaita dependencies:${NC}"
+
+# Initialize a queue for dependency processing (breadth-first search)
+declare -a PENDING_QUEUE
+# Add the main application executable and core GTK/GLib/Adwaita libs to the queue
 REQUIRED_LIBS=(
-    "target/release/${APP_NAME}" # Start with your main executable
-    "/usr/lib/x86_64-linux-gnu/libadwaita-1.so"
-    "/usr/lib/x86_64-linux-gnu/libgtk-4.so"
-    # Note: libgdk-4.so and others like libgio, libglib, libcairo, etc.,
-    # will be pulled as dependencies of libgtk-4.so and libadwaita-1.so.
-    # If your app requires any *other* specific libraries not covered by this chain, add them here.
+    "target/release/${APP_NAME}"
+    "${LIB_PATH_PREFIX}/libadwaita-1.so"
+    "${LIB_PATH_PREFIX}/libgtk-4.so"
 )
 
-# Process the explicitly required libraries
 for lib in "${REQUIRED_LIBS[@]}"; do
-    # For the main executable, we copy it to usr/bin, not usr/lib
-    if [ "$lib" = "target/release/${APP_NAME}" ]; then
-        # Dependencies of the main executable will still go to usr/lib
-        ldd "$lib" 2>/dev/null | grep -oP '=> \K(/[^[:space:]]+)' | grep -v 'libgdk_pixbuf' | grep -v 'libgdk-pixbuf' | while read -r dep_lib; do
-            copy_library_with_deps "$dep_lib" "${APPDIR}/usr/lib" || true
-        done
-    else
-        copy_library_with_deps "$lib" "${APPDIR}/usr/lib" || true
+    resolved_lib=$(readlink -f "$lib")
+    if [[ ! -n "${PROCESSED_FOR_DEPS[$resolved_lib]}" ]]; then
+        PENDING_QUEUE+=("$resolved_lib")
+        PROCESSED_FOR_DEPS[$resolved_lib]=1
     fi
 done
 
-# --- 4.1 Copy GSettings Schemas ---
+# Process dependencies iteratively until the queue is empty
+while [ ${#PENDING_QUEUE[@]} -gt 0 ]; do
+    current_lib="${PENDING_QUEUE[0]}"
+    PENDING_QUEUE=("${PENDING_QUEUE[@]:1}") # Dequeue the first element
+
+    # Add the current library to the list of all dependencies to be copied,
+    # unless it's the main application executable (which is copied separately).
+    if [[ "$current_lib" != "$(readlink -f target/release/${APP_NAME})" ]]; then
+        ALL_DEPENDENCIES["$current_lib"]=1
+    fi
+
+    # Get direct dependencies of the current library
+    new_deps=$(get_library_deps "$current_lib")
+
+    # Add new, unprocessed dependencies to the queue
+    for dep in $new_deps; do
+        if [[ ! -n "${PROCESSED_FOR_DEPS[$dep]}" ]]; then
+            PENDING_QUEUE+=("$dep")
+            PROCESSED_FOR_DEPS[$dep]=1
+        fi
+    done
+done
+
+echo -e "${BLUE}  Copying collected unique dependencies to AppDir:${NC}"
+# Now, iterate through all collected unique dependencies and copy them
+for lib_path in "${!ALL_DEPENDENCIES[@]}"; do
+    lib_basename=$(basename "$lib_path") # Removed 'local'
+    
+    # Only copy if it hasn't been copied yet (should be true for all in ALL_DEPENDENCIES, but good for robustness)
+    if [[ -z "${COPIED_PATHS[$lib_path]}" ]]; then
+        cp "$lib_path" "${APPDIR}/usr/lib/$lib_basename"
+        echo "  Copied: $lib_basename"
+        COPIED_PATHS[$lib_path]=1
+    fi
+done
+
 echo -e "${YELLOW}Copying GSettings schemas...${NC}"
-# Copy GLib and Adwaita schemas
 cp /usr/share/glib-2.0/schemas/gschemas.compiled "${APPDIR}/usr/share/glib-2.0/schemas/" || true
 
-# --- 5. Create AppRun Script ---
 echo -e "${YELLOW}Creating custom AppRun script...${NC}"
 cat > "${APPDIR}/AppRun" << 'EOF'
 #!/bin/bash
@@ -202,7 +206,6 @@ export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/s
 export GTK_DATA_PREFIX="${HERE}/usr"
 export GSETTINGS_SCHEMA_DIR="${HERE}/usr/share/glib-2.0/schemas:${GSETTINGS_SCHEMA_DIR}"
 
-# Explicitly unset GDK_PIXBUF environment variables
 unset GDK_PIXBUF_MODULE_FILE
 unset GDK_PIXBUF_MODULEDIR
 
@@ -210,20 +213,16 @@ exec "${HERE}/usr/bin/lsfg-vk-ui" "$@"
 EOF
 chmod +x "${APPDIR}/AppRun"
 
-# --- 6. Download appimagetool ---
 echo -e "${YELLOW}Downloading appimagetool...${NC}"
-wget -qc "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+wget -qc "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage"
 chmod +x appimagetool-x86_64.AppImage
 
-# --- 7. Generate AppImage ---
 echo -e "${YELLOW}Generating AppImage using appimagetool...${NC}"
 ARCH=x86_64 ./appimagetool-x86_64.AppImage "${APPDIR}" "${FINAL_APPIMAGE_NAME}"
 
-# --- 8. Final Cleanup ---
 echo -e "${YELLOW}Cleaning up build directories...${NC}"
 rm -rf AppDir appimagetool-x86_64.AppImage
 
-# --- Success Message ---
 echo ""
 echo -e "${GREEN}✓ AppImage built successfully: ${FINAL_APPIMAGE_NAME}${NC}"
 echo -e "${GREEN}✓ File size: $(du -h "${FINAL_APPIMAGE_NAME}" | cut -f1)${NC}"
