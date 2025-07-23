@@ -95,14 +95,6 @@ chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 # --- 5. Patch GTK Plugin ---
 echo -e "${YELLOW}Patching GTK plugin to exclude gdk-pixbuf and set up environment...${NC}"
 
-# Create a custom exclusion list for linuxdeploy
-cat > exclude.list << 'EOF'
-libgdk_pixbuf*
-gdk-pixbuf*
-*/gdk-pixbuf*
-*/libgdk_pixbuf*
-EOF
-
 # Modify the GTK plugin to not set up pixbuf
 sed -i 's|export GTK_THEME="\$APPIMAGE_GTK_THEME"|# &|' linuxdeploy-plugin-gtk.sh
 sed -i '/gdk-pixbuf/d' linuxdeploy-plugin-gtk.sh
@@ -115,9 +107,8 @@ LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/lib \
 NO_STRIP=1 ./linuxdeploy-x86_64.AppImage \
     --appdir "${APPDIR}" \
     --plugin gtk \
-    --exclude-lib "libgdk_pixbuf" \
-    --exclude-lib "gdk-pixbuf" \
-    --blacklist exclude.list \
+    --exclude-library "libgdk_pixbuf*.so*" \
+    --exclude-library "gdk-pixbuf*.so*" \
     --output appimage
 
 # --- 6.1. Post-process to ensure proper environment ---
@@ -161,7 +152,7 @@ mv "${GENERATED_APPIMAGE}" "${FINAL_APPIMAGE_NAME}"
 
 # --- 7. Final Cleanup ---
 echo -e "${YELLOW}Cleaning up build directories...${NC}"
-rm -rf AppDir linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh exclude.list
+rm -rf AppDir linuxdeploy-x86_64.AppImage linuxdeploy-plugin-gtk.sh
 
 # --- Success Message ---
 echo ""
