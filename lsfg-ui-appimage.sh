@@ -8,7 +8,7 @@ URUNTIME_LITE="https://github.com/VHSgunzo/uruntime/releases/latest/download/uru
 UPINFO="gh-releases-zsync|$(echo $GITHUB_REPOSITORY | tr '/' '|')|latest|*$ARCH.AppImage.zsync"
 SHARUN="https://github.com/VHSgunzo/sharun/releases/latest/download/sharun-$ARCH-aio"
 
-VERSION=$(awk -F'=|"' '/^version/{print $3}' ./lsfg-ui/Cargo.toml)
+VERSION=$(awk -F'=|"' '/^version/{print $3}' ./Cargo.toml)
 echo "$VERSION" > ~/version
 
 # deploy dependencies
